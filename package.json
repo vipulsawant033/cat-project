@@ -1,0 +1,32 @@
+{
+  "name": "figma-angular-mcp",
+  "version": "1.0.0",
+  "description": "MCP server bridging Figma designs and Angular + Lit component library",
+  "main": "dist/index.js",
+  "scripts": {
+    "start": "node dist/index.js",
+    "dev": "tsx src/index.ts",
+    "dev:watch": "tsx src/index.ts --watch",
+    "build": "tsc",
+    "index": "tsx src/index.ts --index-only",
+    "index:lit": "tsx src/index.ts --index-lit-only",
+    "test": "tsx src/test/integration.ts"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.0.0",
+    "axios": "^1.6.0",
+    "better-sqlite3": "^9.4.0",
+    "chokidar": "^3.6.0",
+    "dotenv": "^16.4.0",
+    "pixelmatch": "^5.3.0",
+    "pngjs": "^7.0.0",
+    "ts-morph": "^21.0.0"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.8",
+    "@types/node": "^20.11.0",
+    "@types/pngjs": "^6.0.4",
+    "tsx": "^4.7.0",
+    "typescript": "^5.3.0"
+  }
+}

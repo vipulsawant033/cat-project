@@ -1,0 +1,47 @@
+{
+  "id": "100:200",
+  "name": "User Profile Card",
+  "type": "FRAME",
+  "layoutMode": "VERTICAL",
+  "primaryAxisAlignItems": "MIN",
+  "counterAxisAlignItems": "MIN",
+  "itemSpacing": 16,
+  "paddingTop": 24,
+  "paddingRight": 24,
+  "paddingBottom": 24,
+  "paddingLeft": 24,
+  "cornerRadius": 8,
+  "fills": [{ "type": "SOLID", "color": { "r": 1, "g": 1, "b": 1, "a": 1 } }],
+  "effects": [{ "type": "DROP_SHADOW", "visible": true, "radius": 8, "color": { "r": 0, "g": 0, "b": 0, "a": 0.12 }, "offset": { "x": 0, "y": 2 }, "spread": 0 }],
+  "absoluteBoundingBox": { "x": 0, "y": 0, "width": 320, "height": 200 },
+  "children": [
+    {
+      "id": "100:201",
+      "name": "Name",
+      "type": "TEXT",
+      "characters": "John Doe",
+      "style": { "fontFamily": "Inter", "fontSize": 18, "fontWeight": 700 },
+      "absoluteBoundingBox": { "x": 24, "y": 24, "width": 272, "height": 24 }
+    },
+    {
+      "id": "100:202",
+      "name": "Subtitle",
+      "type": "TEXT",
+      "characters": "Senior Engineer",
+      "style": { "fontFamily": "Inter", "fontSize": 14, "fontWeight": 400 },
+      "fills": [{ "type": "SOLID", "color": { "r": 0.4, "g": 0.4, "b": 0.4, "a": 1 } }],
+      "absoluteBoundingBox": { "x": 24, "y": 52, "width": 272, "height": 20 }
+    },
+    {
+      "id": "100:203",
+      "name": "Primary Button",
+      "type": "INSTANCE",
+      "componentId": "9999:1111",
+      "variantProperties": { "variant": "primary", "size": "md" },
+      "absoluteBoundingBox": { "x": 24, "y": 140, "width": 120, "height": 36 },
+      "children": [
+        { "id": "100:204", "name": "label", "type": "TEXT", "characters": "View Profile" }
+      ]
+    }
+  ]
+}
