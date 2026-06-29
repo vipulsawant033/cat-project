@@ -1,12 +1,12 @@
 # Environment variables
 .env
+.env.local
+.env.*.local
 
 # Database files
 data/*.db
 data/*.db-shm
 data/*.db-wal
-.env.local
-.env.*.local
 
 # Dependencies
 node_modules/
@@ -14,6 +14,8 @@ node_modules/
 # Build output
 dist/
 build/
+bin/
+obj/
 
 # Logs
 *.log
@@ -26,3 +28,30 @@ Thumbs.db
 # IDE
 .vscode/
 .idea/
+.vs/
+
+# Compiled class/bytecode files
+*.class
+*.py[cod]
+
+# Package files
+*.jar
+
+# Maven
+target/
+
+# Applications
+*.app
+*.exe
+*.war
+
+# Large media files
+*.mp4
+*.tiff
+*.avi
+*.flv
+*.mov
+*.wmv
+
+# Unit test reports
+TEST*.xml
