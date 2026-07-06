@@ -1,6 +1,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
-import { FigmaPaint, FigmaTypeStyle, FigmaEffect, FigmaColor } from './figmaClient.js';
+import { FigmaClient, FigmaPaint, FigmaTypeStyle, FigmaEffect, FigmaColor } from './figmaClient.js';
+import { VariableResolver } from './variableResolver.js';
 import { logger } from '../utils/logger.js';
 
 export interface TokenMap {
@@ -17,14 +18,33 @@ export interface MappedToken {
   litCSSProp?: string;
   rawValue: string;
   unmapped: boolean;
+  source?: 'figma-variable' | 'scss';
 }
 
 export class TokenMapper {
   private scssVars: Map<string, string> = new Map();
   private tokenMap: TokenMap = { colors: {}, typography: {}, spacing: [], shadows: [], radii: [] };
+  private variableResolver?: VariableResolver;
 
   constructor() {
     this.loadScssVars();
+  }
+
+  setVariableResolver(resolver: VariableResolver): void {
+    this.variableResolver = resolver;
+  }
+
+  /** Fetches the file's Figma Variables so mapColor can prefer them over hex-matched SCSS. Non-fatal if unavailable (e.g. non-Enterprise plan, or no variables defined). */
+  async loadFigmaVariables(client: FigmaClient, fileKey: string): Promise<boolean> {
+    try {
+      const data = await client.getLocalVariables(fileKey);
+      this.variableResolver = new VariableResolver(data, process.env.FIGMA_VARIABLE_MODE);
+      logger.debug('Loaded Figma variables', { count: Object.keys(data.meta.variables).length });
+      return true;
+    } catch (err) {
+      logger.debug('Figma variables unavailable, falling back to SCSS hex matching', { error: String(err) });
+      return false;
+    }
   }
 
   private loadScssVars(): void {
@@ -52,26 +72,66 @@ export class TokenMapper {
     return `#${r.toString(16).padStart(2, '0')}${g.toString(16).padStart(2, '0')}${b.toString(16).padStart(2, '0')}`;
   }
 
-  mapColor(color: FigmaColor): MappedToken {
+  mapColor(color: FigmaColor, boundVariableId?: string): MappedToken {
     const hex = this.colorToHex(color);
+
+    if (boundVariableId && this.variableResolver) {
+      const resolved = this.variableResolver.resolve(boundVariableId);
+      if (resolved && resolved.resolvedType === 'COLOR') {
+        return {
+          figmaValue: hex,
+          rawValue: `var(--${resolved.cssName})`,
+          unmapped: false,
+          source: 'figma-variable',
+        };
+      }
+    }
+
     const scssVar = this.scssVars.get(hex.toLowerCase());
     return {
       figmaValue: hex,
       scssVariable: scssVar,
       rawValue: scssVar ? `var(--${scssVar.replace('$', '').replace(/_/g, '-')})` : hex,
       unmapped: !scssVar,
+      source: scssVar ? 'scss' : undefined,
     };
   }
 
-  mapPaint(paint: FigmaPaint): MappedToken {
+  mapPaint(paint: FigmaPaint, boundVariableId?: string): MappedToken {
     if (paint.type === 'SOLID' && paint.color) {
-      return this.mapColor(paint.color);
+      return this.mapColor(paint.color, boundVariableId);
     }
-    if (paint.type === 'GRADIENT_LINEAR' && paint.gradientStops) {
-      const stops = paint.gradientStops.map(s => this.colorToHex(s.color)).join(', ');
-      return { figmaValue: `gradient(${stops})`, rawValue: `linear-gradient(${stops})`, unmapped: true };
+    if (paint.gradientStops?.length) {
+      const stops = this.formatGradientStops(paint.gradientStops);
+      switch (paint.type) {
+        case 'GRADIENT_LINEAR': {
+          const angle = this.computeGradientAngle(paint.gradientHandlePositions);
+          return { figmaValue: `gradient(${stops})`, rawValue: `linear-gradient(${angle}deg, ${stops})`, unmapped: true };
+        }
+        case 'GRADIENT_RADIAL':
+          return { figmaValue: `gradient(${stops})`, rawValue: `radial-gradient(circle, ${stops})`, unmapped: true };
+        case 'GRADIENT_ANGULAR':
+          return { figmaValue: `gradient(${stops})`, rawValue: `conic-gradient(${stops})`, unmapped: true };
+        case 'GRADIENT_DIAMOND':
+          // CSS has no diamond-gradient primitive; an elliptical radial gradient is the closest visual approximation.
+          return { figmaValue: `gradient(${stops})`, rawValue: `radial-gradient(ellipse, ${stops})`, unmapped: true };
+      }
     }
     return { figmaValue: paint.type, rawValue: 'transparent', unmapped: true };
+  }
+
+  private formatGradientStops(stops: Array<{ color: FigmaColor; position: number }>): string {
+    return stops.map(s => `${this.colorToHex(s.color)} ${Math.round(s.position * 100)}%`).join(', ');
+  }
+
+  /** Derives a CSS gradient angle (0deg = up, clockwise) from Figma's normalized start/end handle positions. */
+  private computeGradientAngle(handles?: Array<{ x: number; y: number }>): number {
+    if (!handles || handles.length < 2) return 180; // Figma's default gradient direction: top to bottom.
+    const [start, end] = handles;
+    const dx = end.x - start.x;
+    const dy = end.y - start.y;
+    const angleFromTop = (Math.atan2(dx, -dy) * 180) / Math.PI;
+    return Math.round(((angleFromTop % 360) + 360) % 360);
   }
 
   mapTypography(style: FigmaTypeStyle): Record<string, string> {

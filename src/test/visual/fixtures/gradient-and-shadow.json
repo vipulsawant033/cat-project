@@ -1,0 +1,41 @@
+{
+  "id": "vis:20",
+  "name": "gradient-shadow-card",
+  "type": "FRAME",
+  "layoutMode": "NONE",
+  "absoluteBoundingBox": { "x": 0, "y": 0, "width": 240, "height": 160 },
+  "fills": [{ "type": "SOLID", "color": { "r": 1, "g": 1, "b": 1, "a": 1 } }],
+  "children": [
+    {
+      "id": "vis:21",
+      "name": "Gradient Panel",
+      "type": "RECTANGLE",
+      "absoluteBoundingBox": { "x": 20, "y": 20, "width": 200, "height": 120 },
+      "cornerRadius": 8,
+      "fills": [
+        {
+          "type": "GRADIENT_LINEAR",
+          "gradientStops": [
+            { "color": { "r": 0.98, "g": 0.4, "b": 0.2, "a": 1 }, "position": 0 },
+            { "color": { "r": 0.4, "g": 0.1, "b": 0.9, "a": 1 }, "position": 1 }
+          ],
+          "gradientHandlePositions": [
+            { "x": 0, "y": 0 },
+            { "x": 1, "y": 1 },
+            { "x": 0, "y": 1 }
+          ]
+        }
+      ],
+      "effects": [
+        {
+          "type": "DROP_SHADOW",
+          "visible": true,
+          "radius": 12,
+          "offset": { "x": 0, "y": 6 },
+          "spread": 0,
+          "color": { "r": 0, "g": 0, "b": 0, "a": 0.3 }
+        }
+      ]
+    }
+  ]
+}

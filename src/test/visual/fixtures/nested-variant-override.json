@@ -1,0 +1,11 @@
+{
+  "id": "vis:40",
+  "name": "Group 99",
+  "type": "INSTANCE",
+  "componentId": "9999:1111",
+  "absoluteBoundingBox": { "x": 0, "y": 0, "width": 120, "height": 40 },
+  "variantProperties": { "Variant": "secondary", "Size": "lg" },
+  "children": [
+    { "id": "vis:41", "name": "Label", "type": "TEXT", "characters": "Continue" }
+  ]
+}

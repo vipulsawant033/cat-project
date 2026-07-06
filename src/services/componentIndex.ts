@@ -123,6 +123,12 @@ export class ComponentIndex {
         scss_variable TEXT NOT NULL,
         value TEXT NOT NULL
       );
+
+      CREATE TABLE IF NOT EXISTS style_snapshots (
+        selector TEXT PRIMARY KEY,
+        styles_json TEXT NOT NULL,
+        snapshot_at INTEGER NOT NULL
+      );
     `);
     logger.debug('ComponentIndex database initialized');
   }
@@ -188,6 +194,24 @@ export class ComponentIndex {
     return row ? this.rowToRecord(row) : null;
   }
 
+  /**
+   * Deterministic lookup by Figma node ID, checking explicit `lib_map_figma_to_component`
+   * mappings first (user-curated, may re-target a different selector), then falling back to
+   * the `@figma-component` annotation baked into the component's own source at index time.
+   */
+  getByFigmaComponentId(figmaId: string): (ComponentRecord & { confidence: number }) | null {
+    const mapping = this.getMappingByFigmaId(figmaId);
+    if (mapping) {
+      const rec = this.getBySelector(mapping.selector);
+      if (rec) return { ...rec, confidence: mapping.confidence };
+    }
+
+    const row = this.db.prepare('SELECT * FROM components WHERE figma_component_id = ?').get(figmaId) as Record<string, unknown> | undefined;
+    if (row) return { ...this.rowToRecord(row), confidence: 1.0 };
+
+    return null;
+  }
+
   listAll(filterType?: ComponentType): ComponentRecord[] {
     const rows = filterType
       ? this.db.prepare('SELECT * FROM components WHERE component_type = ?').all(filterType)
@@ -250,6 +274,20 @@ export class ComponentIndex {
     }
     const row = this.db.prepare('SELECT COUNT(*) as n FROM components').get() as { n: number };
     return row.n;
+  }
+
+  /** Persists the last known per-node CSS for a selector so `codegen_diff` can detect drift on the next run. */
+  saveStyleSnapshot(selector: string, styles: Record<string, Record<string, string>>): void {
+    this.db.prepare(`
+      INSERT INTO style_snapshots (selector, styles_json, snapshot_at)
+      VALUES (?, ?, ?)
+      ON CONFLICT(selector) DO UPDATE SET styles_json = excluded.styles_json, snapshot_at = excluded.snapshot_at
+    `).run(selector, JSON.stringify(styles), Date.now());
+  }
+
+  getStyleSnapshot(selector: string): Record<string, Record<string, string>> | null {
+    const row = this.db.prepare('SELECT styles_json FROM style_snapshots WHERE selector = ?').get(selector) as { styles_json: string } | undefined;
+    return row ? JSON.parse(row.styles_json) : null;
   }
 
   private rowToRecord(row: Record<string, unknown>): ComponentRecord {

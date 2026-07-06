@@ -10,7 +10,11 @@ export interface FigmaPaint {
   type: string;
   color?: FigmaColor;
   opacity?: number;
+  visible?: boolean;
   gradientStops?: Array<{ color: FigmaColor; position: number }>;
+  /** Three normalized (0-1) points: [start, end, widthReference] — defines gradient direction/scale. */
+  gradientHandlePositions?: Array<{ x: number; y: number }>;
+  imageRef?: string;
 }
 
 export interface FigmaTypeStyle {
@@ -36,12 +40,20 @@ export interface FigmaNode {
   id: string;
   name: string;
   type: string;
+  visible?: boolean;
   children?: FigmaNode[];
   fills?: FigmaPaint[];
   strokes?: FigmaPaint[];
+  strokeWeight?: number;
+  strokeAlign?: string;
   effects?: FigmaEffect[];
   absoluteBoundingBox?: { x: number; y: number; width: number; height: number };
   constraints?: { vertical: string; horizontal: string };
+  /** Degrees relative to the node's default orientation. Figma's REST API returns this in radians. */
+  rotation?: number;
+  textAutoResize?: 'NONE' | 'WIDTH_AND_HEIGHT' | 'HEIGHT' | 'TRUNCATE';
+  /** 'ABSOLUTE' means this child opts out of its auto-layout parent's flow and free-floats. */
+  layoutPositioning?: 'AUTO' | 'ABSOLUTE';
   layoutMode?: 'HORIZONTAL' | 'VERTICAL' | 'NONE';
   primaryAxisAlignItems?: string;
   counterAxisAlignItems?: string;
@@ -66,6 +78,47 @@ export interface FigmaNode {
   layoutGrow?: number;
   primaryAxisSizingMode?: string;
   counterAxisSizingMode?: string;
+  boundVariables?: FigmaBoundVariables;
+}
+
+export interface FigmaBoundVariable {
+  type: 'VARIABLE_ALIAS';
+  id: string;
+}
+
+export interface FigmaBoundVariables {
+  fills?: FigmaBoundVariable[];
+  strokes?: FigmaBoundVariable[];
+  itemSpacing?: FigmaBoundVariable;
+  paddingLeft?: FigmaBoundVariable;
+  paddingRight?: FigmaBoundVariable;
+  paddingTop?: FigmaBoundVariable;
+  paddingBottom?: FigmaBoundVariable;
+  cornerRadius?: FigmaBoundVariable;
+}
+
+export type FigmaVariableValue = FigmaColor | number | string | boolean | FigmaBoundVariable;
+
+export interface FigmaVariable {
+  id: string;
+  name: string;
+  resolvedType: 'COLOR' | 'FLOAT' | 'STRING' | 'BOOLEAN';
+  variableCollectionId: string;
+  valuesByMode: Record<string, FigmaVariableValue>;
+}
+
+export interface FigmaVariableCollection {
+  id: string;
+  name: string;
+  defaultModeId: string;
+  modes: Array<{ modeId: string; name: string }>;
+}
+
+export interface FigmaVariablesResponse {
+  meta: {
+    variables: Record<string, FigmaVariable>;
+    variableCollections: Record<string, FigmaVariableCollection>;
+  };
 }
 
 export interface FigmaFile {
@@ -163,5 +216,10 @@ export class FigmaClient {
 
   async getStyles(fileKey: string): Promise<{ meta: { styles: Array<{ node_id: string; name: string; style_type: string }> } }> {
     return this.request('GET', `/files/${fileKey}/styles`);
+  }
+
+  /** Requires a Figma Enterprise plan; throws on other plans or files with no published variables. */
+  async getLocalVariables(fileKey: string): Promise<FigmaVariablesResponse> {
+    return this.request('GET', `/files/${fileKey}/variables/local`);
   }
 }

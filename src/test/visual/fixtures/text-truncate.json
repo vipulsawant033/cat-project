@@ -1,0 +1,25 @@
+{
+  "id": "vis:30",
+  "name": "text-truncate-card",
+  "type": "FRAME",
+  "layoutMode": "VERTICAL",
+  "primaryAxisSizingMode": "AUTO",
+  "counterAxisSizingMode": "AUTO",
+  "paddingTop": 16,
+  "paddingBottom": 16,
+  "paddingLeft": 16,
+  "paddingRight": 16,
+  "absoluteBoundingBox": { "x": 0, "y": 0, "width": 220, "height": 60 },
+  "fills": [{ "type": "SOLID", "color": { "r": 1, "g": 1, "b": 1, "a": 1 } }],
+  "children": [
+    {
+      "id": "vis:31",
+      "name": "Long Title",
+      "type": "TEXT",
+      "characters": "This is a much longer product title than the design placeholder ever anticipated",
+      "textAutoResize": "TRUNCATE",
+      "absoluteBoundingBox": { "x": 16, "y": 16, "width": 188, "height": 20 },
+      "style": { "fontFamily": "Inter", "fontSize": 16, "fontWeight": 600 }
+    }
+  ]
+}

@@ -1,0 +1,27 @@
+{
+  "id": "vis:1",
+  "name": "absolute-positioning-card",
+  "type": "FRAME",
+  "layoutMode": "NONE",
+  "absoluteBoundingBox": { "x": 0, "y": 0, "width": 300, "height": 200 },
+  "fills": [{ "type": "SOLID", "color": { "r": 0.95, "g": 0.95, "b": 0.97, "a": 1 } }],
+  "cornerRadius": 12,
+  "children": [
+    {
+      "id": "vis:2",
+      "name": "Background Photo",
+      "type": "RECTANGLE",
+      "absoluteBoundingBox": { "x": 0, "y": 0, "width": 300, "height": 200 },
+      "fills": [{ "type": "SOLID", "color": { "r": 0.7, "g": 0.8, "b": 0.9, "a": 1 } }]
+    },
+    {
+      "id": "vis:3",
+      "name": "Notification Badge",
+      "type": "ELLIPSE",
+      "absoluteBoundingBox": { "x": 260, "y": 10, "width": 30, "height": 30 },
+      "constraints": { "horizontal": "MAX", "vertical": "MIN" },
+      "fills": [{ "type": "SOLID", "color": { "r": 0.9, "g": 0.1, "b": 0.1, "a": 1 } }],
+      "cornerRadius": 15
+    }
+  ]
+}

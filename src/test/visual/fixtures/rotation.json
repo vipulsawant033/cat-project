@@ -1,0 +1,18 @@
+{
+  "id": "vis:10",
+  "name": "rotation-card",
+  "type": "FRAME",
+  "layoutMode": "NONE",
+  "absoluteBoundingBox": { "x": 0, "y": 0, "width": 200, "height": 200 },
+  "fills": [{ "type": "SOLID", "color": { "r": 1, "g": 1, "b": 1, "a": 1 } }],
+  "children": [
+    {
+      "id": "vis:11",
+      "name": "Rotated Swatch",
+      "type": "RECTANGLE",
+      "absoluteBoundingBox": { "x": 80, "y": 80, "width": 40, "height": 40 },
+      "fills": [{ "type": "SOLID", "color": { "r": 0.1, "g": 0.4, "b": 0.9, "a": 1 } }],
+      "rotation": 0.7853981633974483
+    }
+  ]
+}

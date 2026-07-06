@@ -186,6 +186,7 @@ const TOOLS = [
       properties: {
         fileKey: { type: 'string', description: 'Figma file key' },
         pageId: { type: 'string', description: 'Specific page ID (default: first page)' },
+        maxFrames: { type: 'number', description: 'Max top-level frames to generate (default: 30). Extras are reported in skippedFrameNames rather than silently dropped.' },
       },
       required: ['fileKey'],
     },

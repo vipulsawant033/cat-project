@@ -1,7 +1,9 @@
 import * as fs from 'fs';
 import * as path from 'path';
-import { FigmaClient } from '../../services/figmaClient.js';
+import { FigmaClient, FigmaColor } from '../../services/figmaClient.js';
 import { TokenMapper } from '../../services/tokenMapper.js';
+import { VariableResolver } from '../../services/variableResolver.js';
+import { logger } from '../../utils/logger.js';
 
 export async function figmaExtractTokens(args: { fileKey: string }) {
   const client = new FigmaClient();
@@ -42,10 +44,29 @@ export async function figmaExtractTokens(args: { fileKey: string }) {
 
   walk(file.document);
 
+  const variables: Record<string, { cssName: string; type: string; value: unknown; collection: string }> = {};
+  try {
+    const varsResponse = await client.getLocalVariables(args.fileKey);
+    const resolver = new VariableResolver(varsResponse, process.env.FIGMA_VARIABLE_MODE);
+    for (const variable of Object.values(varsResponse.meta.variables)) {
+      const resolved = resolver.resolve(variable.id);
+      if (!resolved) continue;
+      variables[resolved.name] = {
+        cssName: `--${resolved.cssName}`,
+        type: resolved.resolvedType,
+        value: resolved.resolvedType === 'COLOR' ? mapper.colorToHex(resolved.value as FigmaColor) : resolved.value,
+        collection: resolved.collectionName,
+      };
+    }
+  } catch (err) {
+    logger.debug('Figma variables unavailable for this file (requires Enterprise plan or none defined)', { error: String(err) });
+  }
+
   const result = {
     fileKey: args.fileKey,
     name: file.name,
     colors,
+    variables,
     typography: tokenMap.typography,
     spacing: [...spacing].sort((a, b) => a - b),
     radii: [...radii].sort((a, b) => a - b),

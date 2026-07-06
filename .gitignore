@@ -8,6 +8,10 @@ data/*.db
 data/*.db-shm
 data/*.db-wal
 
+# Visual regression run artifacts (baseline PNGs under src/test/visual/baselines/ ARE committed)
+data/visual-regression-history.json
+src/test/visual/baselines/*.diff.png
+
 # Dependencies
 node_modules/
 

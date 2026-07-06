@@ -1,10 +1,27 @@
-import { FigmaNode } from './figmaClient.js';
+import { FigmaClient, FigmaNode } from './figmaClient.js';
 import { ComponentIndex, ComponentRecord } from './componentIndex.js';
 import { TokenMapper } from './tokenMapper.js';
 import { LayoutAnalyzer } from './layoutAnalyzer.js';
 import { logger } from '../utils/logger.js';
 
 export type ComponentTypePreference = 'angular' | 'lit' | 'auto';
+
+/** Max recursion depth for IR generation. Configurable since real screens can nest well past 8-10 levels. */
+const MAX_IR_DEPTH = parseInt(process.env.CODEGEN_MAX_DEPTH || '16', 10);
+
+export interface AssetFetcher {
+  /** Returns base64-encoded asset content (PNG bytes, or SVG XML text) for the given node. */
+  exportAsset(nodeId: string, format: 'png' | 'svg'): Promise<string>;
+}
+
+/** Default AssetFetcher backed by the real Figma REST API. */
+export class FigmaAssetFetcher implements AssetFetcher {
+  constructor(private client: FigmaClient, private fileKey: string) {}
+
+  async exportAsset(nodeId: string, format: 'png' | 'svg'): Promise<string> {
+    return this.client.exportImage(this.fileKey, nodeId, format === 'svg' ? 1 : 2, format);
+  }
+}
 
 export interface IRBinding {
   name: string;
@@ -39,6 +56,10 @@ export interface IRNode {
   text?: string;
   figmaVariantProps?: Record<string, string>;
   className?: string;
+  assetDataUri?: string;
+  assetSvgMarkup?: string;
+  assetAlt?: string;
+  truncated?: boolean;
 }
 
 export interface GeneratedCode {
@@ -57,10 +78,11 @@ export class CodeGenerator {
     private index: ComponentIndex,
     private tokenMapper: TokenMapper,
     private layoutAnalyzer: LayoutAnalyzer,
+    private assetFetcher?: AssetFetcher,
   ) {}
 
-  figmaNodeToIR(node: FigmaNode, preferType?: ComponentTypePreference, depth = 0): IRNode {
-    const layout = this.layoutAnalyzer.analyze(node);
+  async figmaNodeToIR(node: FigmaNode, preferType?: ComponentTypePreference, depth = 0, parent?: FigmaNode): Promise<IRNode> {
+    const layout = this.layoutAnalyzer.analyze(node, parent);
     const cssLayout = this.layoutToCSSRecord(layout);
     const cssStyles = this.extractCSSStyles(node);
     const irType = this.classifyNodeType(node);
@@ -77,6 +99,10 @@ export class CodeGenerator {
       className: this.nodeNameToClass(node.name),
     };
 
+    if ((irType === 'image' || irType === 'icon') && this.assetFetcher) {
+      await this.attachAsset(ir, node, irType);
+    }
+
     // Try to match a component
     const match = this.findComponentMatch(node, preferType);
     if (match && match.confidence > 0.5) {
@@ -89,16 +115,42 @@ export class CodeGenerator {
       };
     }
 
-    if (depth < 8) {
-      ir.children = (node.children || []).map(child =>
-        this.figmaNodeToIR(child, preferType, depth + 1)
+    const visibleChildren = (node.children || []).filter(child => child.visible !== false);
+    if (depth < MAX_IR_DEPTH) {
+      ir.children = await Promise.all(
+        visibleChildren.map(child => this.figmaNodeToIR(child, preferType, depth + 1, node))
       );
+    } else if (visibleChildren.length > 0) {
+      logger.warn('Max IR depth reached, truncating subtree', { nodeId: node.id, name: node.name, depth });
+      ir.truncated = true;
+    }
+
+    if (!cssLayout['position'] && ir.children.some(c => c.cssLayout['position'] === 'absolute')) {
+      ir.cssLayout['position'] = 'relative';
     }
 
     return ir;
   }
 
+  private async attachAsset(ir: IRNode, node: FigmaNode, irType: 'image' | 'icon'): Promise<void> {
+    try {
+      if (irType === 'icon') {
+        const svgBase64 = await this.assetFetcher!.exportAsset(node.id, 'svg');
+        ir.assetSvgMarkup = Buffer.from(svgBase64, 'base64').toString('utf-8');
+      } else {
+        const pngBase64 = await this.assetFetcher!.exportAsset(node.id, 'png');
+        ir.assetDataUri = `data:image/png;base64,${pngBase64}`;
+      }
+      ir.assetAlt = node.name;
+    } catch (err) {
+      logger.warn('Asset export failed, falling back to placeholder markup', { nodeId: node.id, error: String(err) });
+    }
+  }
+
   private findComponentMatch(node: FigmaNode, preferType?: ComponentTypePreference): (ComponentRecord & { confidence: number }) | null {
+    const deterministic = this.findDeterministicMatch(node);
+    if (deterministic) return deterministic;
+
     const isLeaf = !node.children?.length || node.type === 'TEXT';
     const effectivePrefer = preferType === 'auto' || !preferType
       ? (isLeaf ? 'lit' : 'angular')
@@ -116,6 +168,19 @@ export class CodeGenerator {
     }
   }
 
+  /** Checks for an explicit `lib_map_figma_to_component` mapping or `@figma-component` annotation before falling back to fuzzy name search. */
+  private findDeterministicMatch(node: FigmaNode): (ComponentRecord & { confidence: number }) | null {
+    const byInstanceId = this.index.getByFigmaComponentId(node.id);
+    if (byInstanceId) return byInstanceId;
+
+    if (node.componentId) {
+      const byMainComponent = this.index.getByFigmaComponentId(node.componentId);
+      if (byMainComponent) return byMainComponent;
+    }
+
+    return null;
+  }
+
   private computeConfidence(nodeName: string, selector: string): number {
     const n = nodeName.toLowerCase().replace(/[^a-z0-9]/g, '');
     const s = selector.toLowerCase().replace(/[^a-z0-9]/g, '');
@@ -131,19 +196,29 @@ export class CodeGenerator {
     const bindings: IRBinding[] = [];
     const isLit = match.componentType === 'lit';
 
+    // Figma variant props are human-labeled ("Icon Position") while component inputs are
+    // camelCase/kebab-case ("iconPosition") — compare on a normalized form so they still match.
+    const variantEntries = Object.entries(node.variantProperties || {})
+      .map(([key, value]) => ({ normalizedKey: this.normalizePropName(key), value }));
+
     for (const input of match.inputs || []) {
       if (input.internal) continue;
-      const variantValue = node.variantProperties?.[input.name];
-      if (variantValue) {
+      const normalizedInputName = this.normalizePropName(input.name);
+      const matched = variantEntries.find(v => v.normalizedKey === normalizedInputName);
+      if (matched) {
         bindings.push({
           name: input.name,
-          value: variantValue,
+          value: matched.value,
           bindingType: isLit ? 'lit-property' : 'angular-input',
         });
       }
     }
 
     return bindings;
+  }
+
+  private normalizePropName(name: string): string {
+    return name.toLowerCase().replace(/[^a-z0-9]/g, '');
   }
 
   private buildSlots(node: FigmaNode, match: ComponentRecord): IRSlot[] {
@@ -163,7 +238,32 @@ export class CodeGenerator {
     if (ir.type === 'text') {
       return this.renderText(ir);
     }
+    if (ir.type === 'image') {
+      return this.renderImage(ir);
+    }
+    if (ir.type === 'icon') {
+      return this.renderIcon(ir);
+    }
     return this.renderContainer(ir);
+  }
+
+  private renderImage(ir: IRNode): string {
+    const alt = this.escapeAttr(ir.assetAlt || '');
+    if (ir.assetDataUri) {
+      return `<img class="${ir.className}" src="${ir.assetDataUri}" alt="${alt}">`;
+    }
+    return `<!-- TODO: image asset for "${ir.assetAlt || ir.className}" could not be exported --><img class="${ir.className}" alt="${alt}">`;
+  }
+
+  private renderIcon(ir: IRNode): string {
+    if (ir.assetSvgMarkup) {
+      return ir.assetSvgMarkup.replace('<svg', `<svg class="${ir.className}"`);
+    }
+    return `<!-- TODO: icon asset for "${ir.assetAlt || ir.className}" could not be exported --><span class="${ir.className}" role="img" aria-label="${this.escapeAttr(ir.assetAlt || '')}"></span>`;
+  }
+
+  private escapeAttr(value: string): string {
+    return value.replace(/&/g, '&amp;').replace(/"/g, '&quot;');
   }
 
   private renderComponent(ir: IRNode): string {
@@ -309,27 +409,31 @@ export class ${this.toPascalCase(componentName)}Component {}
     return matches;
   }
 
+  /** Figma node names/IDs whose subtrees were cut off by MAX_IR_DEPTH — surfaced so callers can warn instead of silently shipping incomplete output. */
+  collectTruncatedNodes(ir: IRNode): Array<{ figmaNodeId: string; className?: string }> {
+    const truncated: Array<{ figmaNodeId: string; className?: string }> = [];
+    if (ir.truncated) truncated.push({ figmaNodeId: ir.figmaNodeId, className: ir.className });
+    for (const child of ir.children) {
+      truncated.push(...this.collectTruncatedNodes(child));
+    }
+    return truncated;
+  }
+
   private classifyNodeType(node: FigmaNode): IRNode['type'] {
     if (node.type === 'TEXT') return 'text';
     if (node.type === 'VECTOR' || node.type === 'BOOLEAN_OPERATION') return 'icon';
-    if (node.type === 'RECTANGLE' && !node.children?.length) return 'image';
     if (node.type === 'LINE') return 'divider';
     if (node.componentId || node.type === 'COMPONENT' || node.type === 'INSTANCE') return 'component';
+    const hasVisibleImageFill = (node.fills || []).some(f => f.type === 'IMAGE' && f.visible !== false);
+    if (!node.children?.length && (node.type === 'RECTANGLE' || node.type === 'ELLIPSE' || hasVisibleImageFill)) return 'image';
     return 'container';
   }
 
   private extractCSSStyles(node: FigmaNode): Record<string, string> {
     const styles: Record<string, string> = {};
 
-    if (node.fills?.length) {
-      const fill = node.fills[0];
-      if (fill.type === 'SOLID' && fill.color) {
-        const mapped = this.tokenMapper.mapColor(fill.color);
-        styles['background-color'] = mapped.scssVariable
-          ? `var(--${mapped.scssVariable.replace('$', '').replace(/_/g, '-')})`
-          : mapped.figmaValue;
-      }
-    }
+    this.applyFills(styles, node);
+    this.applyStroke(styles, node);
 
     if (node.style) {
       const typographyCSS = this.tokenMapper.mapTypography(node.style);
@@ -351,6 +455,58 @@ export class ${this.toPascalCase(componentName)}Component {}
     return styles;
   }
 
+  /**
+   * Reads the topmost visible fill as the primary background, and layers additional
+   * visible fills as stacked `background-image` entries when more than one is present.
+   * Only the first fill was previously read — losing anything painted underneath a
+   * top color/gradient layer (e.g. a color fill covered by a gradient overlay).
+   */
+  private applyFills(styles: Record<string, string>, node: FigmaNode): void {
+    const visibleFills = (node.fills || [])
+      .map((fill, index) => ({ fill, index }))
+      .filter(f => f.fill.visible !== false);
+
+    if (visibleFills.length === 0) return;
+
+    if (visibleFills.length === 1) {
+      const { fill, index } = visibleFills[0];
+      if (fill.type === 'SOLID' && fill.color) {
+        const boundVariableId = node.boundVariables?.fills?.[index]?.id;
+        styles['background-color'] = this.tokenMapper.mapColor(fill.color, boundVariableId).rawValue;
+      } else if (fill.type.startsWith('GRADIENT_')) {
+        styles['background-image'] = this.tokenMapper.mapPaint(fill).rawValue;
+      }
+      return;
+    }
+
+    // CSS paints the first-listed background layer on top; Figma's fills array lists
+    // the topmost layer last, so reverse it to preserve visual stacking order.
+    const layers = [...visibleFills].reverse().map(({ fill, index }) => {
+      if (fill.type === 'SOLID' && fill.color) {
+        const boundVariableId = node.boundVariables?.fills?.[index]?.id;
+        const color = this.tokenMapper.mapColor(fill.color, boundVariableId).rawValue;
+        // A flat two-stop gradient is the standard trick for a solid color inside a background-image stack.
+        return `linear-gradient(${color}, ${color})`;
+      }
+      if (fill.type.startsWith('GRADIENT_')) {
+        return this.tokenMapper.mapPaint(fill).rawValue;
+      }
+      return null;
+    }).filter((v): v is string => !!v);
+
+    if (layers.length) styles['background-image'] = layers.join(', ');
+  }
+
+  private applyStroke(styles: Record<string, string>, node: FigmaNode): void {
+    if (!node.strokeWeight) return;
+    const visibleStroke = (node.strokes || []).find(s => s.visible !== false);
+    if (!visibleStroke || visibleStroke.type !== 'SOLID' || !visibleStroke.color) return;
+
+    const boundVariableId = node.boundVariables?.strokes?.[0]?.id;
+    const color = this.tokenMapper.mapColor(visibleStroke.color, boundVariableId).rawValue;
+    styles['border'] = `${Math.round(node.strokeWeight)}px solid ${color}`;
+  }
+
   private layoutToCSSRecord(layout: ReturnType<LayoutAnalyzer['analyze']>): Record<string, string> {
     const css: Record<string, string> = {};
     if (layout.display !== 'block') css['display'] = layout.display;
@@ -363,6 +519,14 @@ export class ${this.toPascalCase(componentName)}Component {}
     if (layout.overflow) css['overflow'] = layout.overflow;
     if (layout.borderRadius) css['border-radius'] = layout.borderRadius;
     if (layout.flex) css['flex'] = layout.flex;
+    if (layout.position) css['position'] = layout.position;
+    if (layout.top) css['top'] = layout.top;
+    if (layout.right) css['right'] = layout.right;
+    if (layout.bottom) css['bottom'] = layout.bottom;
+    if (layout.left) css['left'] = layout.left;
+    if (layout.transform) css['transform'] = layout.transform;
+    if (layout.textOverflow) css['text-overflow'] = layout.textOverflow;
+    if (layout.whiteSpace) css['white-space'] = layout.whiteSpace;
     return css;
   }
 

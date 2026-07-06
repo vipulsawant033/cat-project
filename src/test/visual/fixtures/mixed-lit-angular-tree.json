@@ -1,0 +1,37 @@
+{
+  "id": "vis:50",
+  "name": "Dashboard Section",
+  "type": "FRAME",
+  "layoutMode": "VERTICAL",
+  "itemSpacing": 12,
+  "paddingTop": 16,
+  "paddingBottom": 16,
+  "paddingLeft": 16,
+  "paddingRight": 16,
+  "absoluteBoundingBox": { "x": 0, "y": 0, "width": 320, "height": 220 },
+  "fills": [{ "type": "SOLID", "color": { "r": 0.98, "g": 0.98, "b": 0.98, "a": 1 } }],
+  "children": [
+    {
+      "id": "vis:51",
+      "name": "User Card Instance",
+      "type": "INSTANCE",
+      "componentId": "1234:5678",
+      "absoluteBoundingBox": { "x": 16, "y": 16, "width": 288, "height": 120 },
+      "children": [
+        { "id": "vis:52", "name": "Name", "type": "TEXT", "characters": "Jane Doe" },
+        { "id": "vis:53", "name": "Subtitle", "type": "TEXT", "characters": "Product Designer" },
+        {
+          "id": "vis:54",
+          "name": "Confirm Button",
+          "type": "INSTANCE",
+          "componentId": "9999:1111",
+          "variantProperties": { "Variant": "primary", "Size": "sm" },
+          "absoluteBoundingBox": { "x": 32, "y": 100, "width": 80, "height": 28 },
+          "children": [
+            { "id": "vis:55", "name": "Label", "type": "TEXT", "characters": "Follow" }
+          ]
+        }
+      ]
+    }
+  ]
+}

@@ -21,6 +21,10 @@ export interface CSSLayoutModel {
   flex?: string;
   borderRadius?: string;
   zIndex?: string;
+  transform?: string;
+  textOverflow?: string;
+  whiteSpace?: string;
+  webkitLineClamp?: string;
 }
 
 export class LayoutAnalyzer {
@@ -48,6 +52,13 @@ export class LayoutAnalyzer {
       layout.flex = '1';
     }
 
+    const isFreeFloating = node.layoutPositioning === 'ABSOLUTE'
+      || !parent?.layoutMode || parent.layoutMode === 'NONE';
+
+    if (isFreeFloating && parent?.absoluteBoundingBox && node.absoluteBoundingBox) {
+      this.applyAbsolutePositioning(layout, node, parent);
+    }
+
     if (node.absoluteBoundingBox) {
       const { width, height } = node.absoluteBoundingBox;
       if (!layout.width || layout.width === 'fit-content') {
@@ -58,6 +69,10 @@ export class LayoutAnalyzer {
       }
     }
 
+    // Runs last so a text node's intentional fit-content sizing isn't clobbered by the
+    // bounding-box fallback above (which otherwise treats 'fit-content' as still-undecided).
+    this.applyTextSizing(layout, node);
+
     if (node.clipsContent) layout.overflow = 'hidden';
 
     if (node.cornerRadius) {
@@ -67,7 +82,72 @@ export class LayoutAnalyzer {
       layout.borderRadius = `${tl}px ${tr}px ${br}px ${bl}px`;
     }
 
+    if (node.rotation) {
+      // Figma's REST API returns rotation in radians (unlike the Plugin API, which uses degrees).
+      const degrees = Math.round((node.rotation * 180 / Math.PI) * 100) / 100;
+      if (degrees !== 0) layout.transform = `rotate(${degrees}deg)`;
+    }
+
     return layout;
+  }
+
+  /** Positions a free-floating node (outside auto-layout flow) relative to its parent, honoring constraints for edge-anchoring. */
+  private applyAbsolutePositioning(layout: CSSLayoutModel, node: FigmaNode, parent: FigmaNode): void {
+    const nodeBox = node.absoluteBoundingBox!;
+    const parentBox = parent.absoluteBoundingBox!;
+
+    layout.position = 'absolute';
+
+    const offsetLeft = Math.round(nodeBox.x - parentBox.x);
+    const offsetTop = Math.round(nodeBox.y - parentBox.y);
+    const offsetRight = Math.round((parentBox.x + parentBox.width) - (nodeBox.x + nodeBox.width));
+    const offsetBottom = Math.round((parentBox.y + parentBox.height) - (nodeBox.y + nodeBox.height));
+
+    const horizontal = node.constraints?.horizontal || 'MIN';
+    const vertical = node.constraints?.vertical || 'MIN';
+
+    if (horizontal === 'MAX') {
+      layout.right = `${offsetRight}px`;
+    } else if (horizontal === 'STRETCH') {
+      layout.left = `${offsetLeft}px`;
+      layout.right = `${offsetRight}px`;
+      layout.width = undefined;
+    } else {
+      // MIN, CENTER, and SCALE are all approximated as left-anchored — CENTER/SCALE would
+      // need percentage math relative to the parent's resized dimensions to be exact.
+      layout.left = `${offsetLeft}px`;
+    }
+
+    if (vertical === 'MAX') {
+      layout.bottom = `${offsetBottom}px`;
+    } else if (vertical === 'STRETCH') {
+      layout.top = `${offsetTop}px`;
+      layout.bottom = `${offsetBottom}px`;
+      layout.height = undefined;
+    } else {
+      layout.top = `${offsetTop}px`;
+    }
+  }
+
+  private applyTextSizing(layout: CSSLayoutModel, node: FigmaNode): void {
+    if (node.type !== 'TEXT') return;
+
+    switch (node.textAutoResize) {
+      case 'WIDTH_AND_HEIGHT':
+        layout.width = 'fit-content';
+        layout.height = 'fit-content';
+        break;
+      case 'HEIGHT':
+        layout.height = 'fit-content';
+        break;
+      case 'TRUNCATE':
+        layout.overflow = 'hidden';
+        layout.textOverflow = 'ellipsis';
+        layout.whiteSpace = 'nowrap';
+        break;
+      default:
+        break;
+    }
   }
 
   toCSSString(layout: CSSLayoutModel): string {
@@ -98,6 +178,9 @@ export class LayoutAnalyzer {
     if (layout.left) entries.push(`left: ${layout.left}`);
     if (layout.flex) entries.push(`flex: ${layout.flex}`);
     if (layout.borderRadius) entries.push(`border-radius: ${layout.borderRadius}`);
+    if (layout.transform) entries.push(`transform: ${layout.transform}`);
+    if (layout.textOverflow) entries.push(`text-overflow: ${layout.textOverflow}`);
+    if (layout.whiteSpace) entries.push(`white-space: ${layout.whiteSpace}`);
     return entries.join(';\n  ');
   }
 
