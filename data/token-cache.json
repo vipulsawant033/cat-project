@@ -1,0 +1,115 @@
+{
+  "fileKey": "k2gmb3Am788X6YbOMROz1Q",
+  "name": "Drill Dashboard POC",
+  "colors": {
+    "#ffffff": "Figma Mockup",
+    "#f8fafc": "Dashboard/ Live Data",
+    "#000000": "Menu",
+    "#ffcd11": "Tab",
+    "#e2e8f0": "divider",
+    "#94a3b8": "Vector",
+    "#334155": "Vector",
+    "#10b981": "overlaybadge",
+    "#aba7a7": "Speed",
+    "#f5f5f5": "Vector",
+    "#364153": "0",
+    "#4a5565": "Container",
+    "#e5e7eb": "Gauge",
+    "#60a5fa": "Frame 1",
+    "#ef4444": "Frame 2",
+    "#fefefe": "Frame 3",
+    "#22c55e": "Frame",
+    "#9ca3af": "Depth: 850m",
+    "#f5b00b": "Map Marker",
+    "#eeeeee": "Rectangle",
+    "#64748b": "Avg 72.1 MPH",
+    "#f97316": "Chart Area",
+    "#3b82f6": "Chart Area",
+    "#22c555": "Chart Area",
+    "#a855f7": "Chart Area"
+  },
+  "variables": {},
+  "typography": {
+    "Label": {},
+    "Header": {},
+    "Body": {}
+  },
+  "spacing": [
+    1,
+    4,
+    8,
+    10,
+    12,
+    16,
+    24,
+    32,
+    48,
+    58
+  ],
+  "radii": [
+    2,
+    3,
+    4,
+    5,
+    6,
+    8,
+    10.5,
+    12,
+    16,
+    20,
+    30,
+    99,
+    33554400
+  ],
+  "shadows": [
+    "0px 2px 4px -2px rgba(0, 0, 0, 0.10)",
+    "0px 4px 6px -1px rgba(0, 0, 0, 0.10)",
+    "0px 1px 2px -1px #ffcd11",
+    "0px 1px 3px 0px rgba(0, 0, 0, 0.10)",
+    "0px 4px 8px 0px rgba(0, 0, 0, 0.15)",
+    "inset 0px 2px 4px rgba(0, 0, 0, 0.05)",
+    "0px 2px 4px 0px rgba(0, 0, 0, 0.25)",
+    "0px 1px 2px 0px rgba(0, 0, 0, 0.05)",
+    "0px 1px 2px -1px #f97316",
+    "0px 1px 2px -1px #3b82f6",
+    "0px 1px 2px -1px #22c555",
+    "0px 1px 2px -1px #a855f7"
+  ],
+  "namedStyles": {
+    "7:3467": {
+      "key": "06bfea47f0f46832778109321f8cfb6ec1691829",
+      "name": "Label",
+      "styleType": "TEXT",
+      "remote": true,
+      "description": "input fields, buttons"
+    },
+    "7:943": {
+      "key": "a272b521f393d721a6fb007bfd79c934d9c27b55",
+      "name": "menu/shadow",
+      "styleType": "EFFECT",
+      "remote": true,
+      "description": ""
+    },
+    "11:2176": {
+      "key": "a65b70b79e99b9f22a09f5e0461c310e7612b954",
+      "name": "Header",
+      "styleType": "TEXT",
+      "remote": false,
+      "description": "Page Header"
+    },
+    "11:2175": {
+      "key": "9b1a18f098be10ef10507147eacf515803ad9d4c",
+      "name": "Body",
+      "styleType": "TEXT",
+      "remote": false,
+      "description": "Descriptions, card header"
+    },
+    "7:8162": {
+      "key": "0fb91412af4d38214bd3660c15febb358fa57a65",
+      "name": "Body",
+      "styleType": "TEXT",
+      "remote": true,
+      "description": "Paragraphs, descriptions"
+    }
+  }
+}

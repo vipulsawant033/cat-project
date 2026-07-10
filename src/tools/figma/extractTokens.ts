@@ -74,11 +74,15 @@ export async function figmaExtractTokens(args: { fileKey: string }) {
     namedStyles: file.styles,
   };
 
-  // Persist cache
-  const cachePath = path.resolve('./data/token-cache.json');
-  const dir = path.dirname(cachePath);
-  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-  fs.writeFileSync(cachePath, JSON.stringify(result, null, 2));
+  // Persist cache (best-effort; a failed write shouldn't fail token extraction)
+  try {
+    const cachePath = path.resolve(process.env.CACHE_PATH || path.join(__dirname, '..', '..', '..', 'data', 'token-cache.json'));
+    const dir = path.dirname(cachePath);
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(cachePath, JSON.stringify(result, null, 2));
+  } catch (err) {
+    logger.debug('Failed to persist token cache (non-fatal)', { error: String(err) });
+  }
 
   return result;
 }
