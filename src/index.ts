@@ -9,6 +9,8 @@ import { logger } from './utils/logger.js';
 // Tool implementations
 import { figmaGetFile } from './tools/figma/getFile.js';
 import { figmaGetNode } from './tools/figma/getNode.js';
+import { figmaGetNodeOutline } from './tools/figma/getNodeOutline.js';
+import { figmaGetNodeVariables } from './tools/figma/getNodeVariables.js';
 import { figmaExtractTokens } from './tools/figma/extractTokens.js';
 import { figmaGetComponentSet } from './tools/figma/getComponentSet.js';
 import { figmaExportNodeImage } from './tools/figma/exportNodeImage.js';
@@ -33,25 +35,53 @@ const indexLitOnly = args.includes('--index-lit-only');
 const TOOLS = [
   {
     name: 'figma_get_file',
-    description: 'Fetches the full Figma file tree trimmed to depth 5. USE THIS WHEN you need an overview of a Figma file structure, component catalog, or design system layout. Returns document tree, node count, styles, and optionally component definitions.',
+    description: 'Fetches the full Figma file tree trimmed to depth 5. USE THIS WHEN you need an overview of a Figma file structure, component catalog, or design system layout. Returns document tree, node count, styles, and optionally component definitions. If the tree is too large, automatically falls back to a structural outline instead of failing (see truncated/outline fields); pass forceRaw:true to bypass this and always get the full/raw shape.',
     inputSchema: {
       type: 'object',
       properties: {
         fileKey: { type: 'string', description: 'Figma file key from the URL (e.g. abc123XYZ)' },
         includeComponents: { type: 'boolean', description: 'Include component and component set definitions' },
+        forceRaw: { type: 'boolean', description: 'Bypass the response-size guard and always return the full document shape, even if it may exceed the MCP size limit' },
       },
       required: ['fileKey'],
     },
   },
   {
     name: 'figma_get_node',
-    description: 'Fetches a single Figma node and its subtree up to a configurable depth. USE THIS WHEN you have a specific Figma frame or component node ID and want to inspect its structure and properties for code generation.',
+    description: 'Fetches a single Figma node and its subtree up to a configurable depth, plus a screenshot by default. USE THIS WHEN you have a specific Figma frame or component node ID and want to inspect its structure and properties for code generation. For a cheap structural preview before fetching full style data, use figma_get_node_outline first. If the tree is too large, automatically falls back to a structural outline instead of failing (see truncated/outline fields); pass forceRaw:true to bypass this and always get the full/raw shape.',
     inputSchema: {
       type: 'object',
       properties: {
         fileKey: { type: 'string', description: 'Figma file key' },
         nodeId: { type: 'string', description: 'Node ID (e.g. 123:456)' },
         depth: { type: 'number', description: 'Max depth of subtree to return (default 3)' },
+        forceRaw: { type: 'boolean', description: 'Bypass the response-size guard and always return the full document shape, even if it may exceed the MCP size limit' },
+        excludeScreenshot: { type: 'boolean', description: 'Skip exporting a screenshot of the node (default false — a screenshot is exported and its file path returned by default)' },
+      },
+      required: ['fileKey', 'nodeId'],
+    },
+  },
+  {
+    name: 'figma_get_node_outline',
+    description: 'Returns a lightweight structural outline (id, name, type, depth, path, hasChildren, childCount) of a Figma node and all its descendants, with no style/geometry data. USE THIS FIRST to cheaply browse a node\'s structure and find the specific child nodeId you actually need, before calling figma_get_node (which returns full per-node style data and can be large for wide or deep trees) or codegen_from_node.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        fileKey: { type: 'string', description: 'Figma file key' },
+        nodeId: { type: 'string', description: 'Node ID (e.g. 123:456)' },
+        maxNodes: { type: 'number', description: 'Cap on number of outline entries returned (default 500)' },
+      },
+      required: ['fileKey', 'nodeId'],
+    },
+  },
+  {
+    name: 'figma_get_node_variables',
+    description: 'Returns only the Figma Variables (design tokens) actually bound to a specific node and its descendants, resolved to concrete values. USE THIS WHEN you need the variables relevant to one component/frame rather than the whole file. For a file-wide token/variable catalog, use figma_extract_tokens instead.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        fileKey: { type: 'string', description: 'Figma file key' },
+        nodeId: { type: 'string', description: 'Node ID (e.g. 123:456)' },
       },
       required: ['fileKey', 'nodeId'],
     },
@@ -81,7 +111,7 @@ const TOOLS = [
   },
   {
     name: 'figma_export_node_image',
-    description: 'Exports a Figma node as a PNG or SVG image (base64 encoded). USE THIS WHEN you need a visual reference for the design, or when running codegen_validate to compare rendered output against the Figma design.',
+    description: 'Exports a Figma node as a PNG or SVG image, saved to disk (default response includes only the file path to save tokens). USE THIS WHEN you need a visual reference for the design, or when running codegen_validate to compare rendered output against the Figma design.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -89,6 +119,7 @@ const TOOLS = [
         nodeId: { type: 'string', description: 'Node ID to export' },
         scale: { type: 'number', description: 'Export scale (1-4, default 2)' },
         format: { type: 'string', enum: ['png', 'svg'], description: 'Export format (default png)' },
+        enableBase64Response: { type: 'boolean', description: 'Include the full base64-encoded image inline in the response (default false — response includes only a filePath by default to save tokens)' },
       },
       required: ['fileKey', 'nodeId'],
     },
@@ -253,6 +284,8 @@ async function runTool(name: string, args: ToolArgs): Promise<unknown> {
   switch (name) {
     case 'figma_get_file': return figmaGetFile(args as Parameters<typeof figmaGetFile>[0]);
     case 'figma_get_node': return figmaGetNode(args as Parameters<typeof figmaGetNode>[0]);
+    case 'figma_get_node_outline': return figmaGetNodeOutline(args as Parameters<typeof figmaGetNodeOutline>[0]);
+    case 'figma_get_node_variables': return figmaGetNodeVariables(args as Parameters<typeof figmaGetNodeVariables>[0]);
     case 'figma_extract_tokens': return figmaExtractTokens(args as Parameters<typeof figmaExtractTokens>[0]);
     case 'figma_get_component_set': return figmaGetComponentSet(args as Parameters<typeof figmaGetComponentSet>[0]);
     case 'figma_export_node_image': return figmaExportNodeImage(args as Parameters<typeof figmaExportNodeImage>[0]);
@@ -334,7 +367,7 @@ async function main(): Promise<void> {
     try {
       const result = await runTool(name, (toolArgs || {}) as ToolArgs);
       return {
-        content: [{ type: 'text', text: JSON.stringify(result, null, 2) }],
+        content: [{ type: 'text', text: JSON.stringify(result) }],
       };
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);

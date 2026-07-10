@@ -69,3 +69,20 @@ export class VariableResolver {
     return name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
   }
 }
+
+export interface FormattedVariable {
+  cssName: string;
+  type: string;
+  value: unknown;
+  collection: string;
+}
+
+/** Shapes a resolved variable into the response format shared by figma_extract_tokens and figma_get_node_variables. */
+export function formatResolvedVariable(resolved: ResolvedVariable, colorToHex: (color: FigmaColor) => string): FormattedVariable {
+  return {
+    cssName: `--${resolved.cssName}`,
+    type: resolved.resolvedType,
+    value: resolved.resolvedType === 'COLOR' ? colorToHex(resolved.value as FigmaColor) : resolved.value,
+    collection: resolved.collectionName,
+  };
+}

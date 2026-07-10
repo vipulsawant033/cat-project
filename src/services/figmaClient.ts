@@ -191,12 +191,16 @@ export class FigmaClient {
     throw new Error('Max retries exceeded for Figma API');
   }
 
-  async getFile(fileKey: string): Promise<FigmaFile> {
-    return this.request<FigmaFile>('GET', `/files/${fileKey}`);
+  async getFile(fileKey: string, opts?: { depth?: number }): Promise<FigmaFile> {
+    const params: Record<string, unknown> = {};
+    if (opts?.depth !== undefined) params.depth = opts.depth;
+    return this.request<FigmaFile>('GET', `/files/${fileKey}`, params);
   }
 
-  async getNode(fileKey: string, nodeId: string): Promise<{ nodes: Record<string, { document: FigmaNode }> }> {
-    return this.request('GET', `/files/${fileKey}/nodes`, { ids: nodeId });
+  async getNode(fileKey: string, nodeId: string, opts?: { depth?: number }): Promise<{ nodes: Record<string, { document: FigmaNode }> }> {
+    const params: Record<string, unknown> = { ids: nodeId };
+    if (opts?.depth !== undefined) params.depth = opts.depth;
+    return this.request('GET', `/files/${fileKey}/nodes`, params);
   }
 
   async getComponentSets(fileKey: string): Promise<{ meta: { component_sets: ComponentSet[] } }> {

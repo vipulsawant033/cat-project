@@ -1,8 +1,8 @@
 import * as fs from 'fs';
 import * as path from 'path';
-import { FigmaClient, FigmaColor } from '../../services/figmaClient.js';
+import { FigmaClient } from '../../services/figmaClient.js';
 import { TokenMapper } from '../../services/tokenMapper.js';
-import { VariableResolver } from '../../services/variableResolver.js';
+import { VariableResolver, formatResolvedVariable } from '../../services/variableResolver.js';
 import { logger } from '../../utils/logger.js';
 
 export async function figmaExtractTokens(args: { fileKey: string }) {
@@ -51,12 +51,7 @@ export async function figmaExtractTokens(args: { fileKey: string }) {
     for (const variable of Object.values(varsResponse.meta.variables)) {
       const resolved = resolver.resolve(variable.id);
       if (!resolved) continue;
-      variables[resolved.name] = {
-        cssName: `--${resolved.cssName}`,
-        type: resolved.resolvedType,
-        value: resolved.resolvedType === 'COLOR' ? mapper.colorToHex(resolved.value as FigmaColor) : resolved.value,
-        collection: resolved.collectionName,
-      };
+      variables[resolved.name] = formatResolvedVariable(resolved, (color) => mapper.colorToHex(color));
     }
   } catch (err) {
     logger.debug('Figma variables unavailable for this file (requires Enterprise plan or none defined)', { error: String(err) });
