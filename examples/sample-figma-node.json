@@ -1,0 +1,44 @@
+{
+  "id": "1:1",
+  "name": "Profile Card",
+  "type": "FRAME",
+  "visible": true,
+  "layoutMode": "VERTICAL",
+  "itemSpacing": 12,
+  "paddingLeft": 24,
+  "paddingRight": 24,
+  "paddingTop": 24,
+  "paddingBottom": 24,
+  "primaryAxisAlignItems": "MIN",
+  "counterAxisAlignItems": "CENTER",
+  "cornerRadius": 12,
+  "opacity": 1,
+  "absoluteBoundingBox": { "x": 0, "y": 0, "width": 320, "height": 180 },
+  "fills": [
+    { "type": "SOLID", "visible": true, "opacity": 1, "color": { "r": 1, "g": 1, "b": 1, "a": 1 } }
+  ],
+  "children": [
+    {
+      "id": "1:2",
+      "name": "Name",
+      "type": "TEXT",
+      "visible": true,
+      "characters": "Ada Lovelace",
+      "style": { "fontFamily": "Inter", "fontWeight": 700, "fontSize": 20 },
+      "fills": [
+        { "type": "SOLID", "visible": true, "opacity": 1, "color": { "r": 0.09, "g": 0.09, "b": 0.09, "a": 1 } }
+      ]
+    },
+    {
+      "id": "1:3",
+      "name": "Title",
+      "type": "TEXT",
+      "visible": true,
+      "characters": "Mathematician & Writer",
+      "style": { "fontFamily": "Inter", "fontWeight": 400, "fontSize": 14 },
+      "fills": [
+        { "type": "SOLID", "visible": true, "opacity": 1, "color": { "r": 0.42, "g": 0.42, "b": 0.42, "a": 1 } }
+      ]
+    }
+  ]
+}

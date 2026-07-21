@@ -1,0 +1,20 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npm install *)",
+      "Bash(npm run *)",
+      "Bash(node scratch-test.mjs)",
+      "Bash(node scratch-test-preview.mjs)",
+      "Bash(rm -f scratch-test-preview.mjs)",
+      "Bash(npm --version)",
+      "Bash(rm -rf preview-app)",
+      "Bash(npx --yes @angular/cli@19 new preview-app --skip-git --skip-tests --style=scss --routing=false --package-manager=npm)",
+      "Bash(node scratch-test-serve.mjs)",
+      "Bash(powershell -NoProfile -Command \"Get-CimInstance Win32_Process -Filter \\\\\"Name='node.exe'\\\\\" | Select-Object ProcessId,CommandLine | Format-List\")",
+      "Bash(timeout 60 npm start -- --port 4301)",
+      "Bash(rm -f scratch-test-serve.mjs)",
+      "Bash(rm -f preview-app/.preview-state.json)",
+      "Bash(powershell -NoProfile -Command 'Get-CimInstance Win32_Process -Filter \"Name='\\\\''node.exe'\\\\''\" | Where-Object { $_.CommandLine -like '\\\\''*new mcp*'\\\\'' } | Select-Object ProcessId,CommandLine')"
+    ]
+  }
+}
