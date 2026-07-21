@@ -24,8 +24,6 @@ import { codegenFromNode } from './tools/codegen/fromNode.js';
 import { codegenFromFile } from './tools/codegen/fromFile.js';
 import { codegenValidate } from './tools/codegen/validate.js';
 import { codegenDiff } from './tools/codegen/diff.js';
-import { syncToFigma } from './tools/sync/toFigma.js';
-import { syncUpdateTokens } from './tools/sync/updateTokens.js';
 
 const args = process.argv.slice(2);
 const watchMode = args.includes('--watch');
@@ -251,31 +249,6 @@ const TOOLS = [
       required: ['fileKey', 'nodeId', 'selector'],
     },
   },
-  {
-    name: 'sync_to_figma',
-    description: 'Generates a Figma Plugin JavaScript snippet that creates a Figma frame from an Angular component. USE THIS to push existing Angular/Lit components back into Figma. Returns a script to paste in Figma → Plugins → Development → Console.',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        selector: { type: 'string', description: 'Angular component selector to sync' },
-        targetFileKey: { type: 'string', description: 'Figma file to create the frame in' },
-        targetPageId: { type: 'string', description: 'Target page ID (optional)' },
-      },
-      required: ['selector', 'targetFileKey'],
-    },
-  },
-  {
-    name: 'sync_update_tokens',
-    description: 'Matches SCSS token variables to Figma styles and generates a plugin script to update them. USE THIS to keep Figma styles in sync with the Angular/Lit design token file.',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        targetFileKey: { type: 'string', description: 'Figma file key to update styles in' },
-        scssTokensPath: { type: 'string', description: 'Path to SCSS tokens file (overrides SCSS_TOKENS_PATH)' },
-      },
-      required: ['targetFileKey'],
-    },
-  },
 ];
 
 type ToolArgs = Record<string, unknown>;
@@ -299,8 +272,6 @@ async function runTool(name: string, args: ToolArgs): Promise<unknown> {
     case 'codegen_from_file': return codegenFromFile(args as Parameters<typeof codegenFromFile>[0]);
     case 'codegen_validate': return codegenValidate(args as Parameters<typeof codegenValidate>[0]);
     case 'codegen_diff': return codegenDiff(args as Parameters<typeof codegenDiff>[0]);
-    case 'sync_to_figma': return syncToFigma(args as Parameters<typeof syncToFigma>[0]);
-    case 'sync_update_tokens': return syncUpdateTokens(args as Parameters<typeof syncUpdateTokens>[0]);
     default: throw new Error(`Unknown tool: ${name}`);
   }
 }

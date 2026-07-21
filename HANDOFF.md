@@ -105,7 +105,6 @@ figma-angular-mcp/
 ├── src/tools/figma/          ← Figma API tools
 ├── src/tools/library/        ← Component index tools
 ├── src/tools/codegen/        ← Code generation tools  
-├── src/tools/sync/           ← Angular→Figma sync tools
 ├── src/services/             ← Core services (FigmaClient, ComponentIndex, CodeGenerator)
 ├── src/parsers/              ← Angular and Lit AST parsers
 ├── src/test/fixtures/        ← Sample components for integration tests

@@ -4,20 +4,6 @@ import * as path from 'path';
 import { ComponentRecord, InputDef, OutputDef } from '../services/componentIndex.js';
 import { logger } from '../utils/logger.js';
 
-export interface SyncModel {
-  selector: string;
-  templateTree: TemplateNode[];
-  styles: Record<string, string>;
-  inputs: Record<string, unknown>;
-}
-
-export interface TemplateNode {
-  tag: string;
-  attributes: Record<string, string>;
-  children: TemplateNode[];
-  text?: string;
-}
-
 export class AngularParser {
   private project: Project;
 
@@ -162,42 +148,5 @@ export class AngularParser {
   private buildExampleUsage(selector: string, inputs: InputDef[]): string {
     const attrs = inputs.slice(0, 3).map(i => `[${i.name}]="${i.defaultValue || "'value'"}"`).join('\n  ');
     return `<${selector}\n  ${attrs}>\n</${selector}>`;
-  }
-
-  parseComponentForSync(selector: string, sourcePath: string): SyncModel | null {
-    try {
-      const files = this.findComponentFile(selector, sourcePath);
-      if (!files) return null;
-
-      return {
-        selector,
-        templateTree: [],
-        styles: {},
-        inputs: {},
-      };
-    } catch {
-      return null;
-    }
-  }
-
-  private findComponentFile(selector: string, sourcePath: string): string | null {
-    if (!fs.existsSync(sourcePath)) return null;
-    const walk = (dir: string): string | null => {
-      for (const file of fs.readdirSync(dir)) {
-        const full = path.join(dir, file);
-        const stat = fs.statSync(full);
-        if (stat.isDirectory()) {
-          const found = walk(full);
-          if (found) return found;
-        } else if (file.endsWith('.ts') && !file.endsWith('.d.ts') && !file.endsWith('.spec.ts')) {
-          const content = fs.readFileSync(full, 'utf-8');
-          if (content.includes(`selector: '${selector}'`) || content.includes(`selector: "${selector}"`)) {
-            return full;
-          }
-        }
-      }
-      return null;
-    };
-    return walk(sourcePath);
   }
 }

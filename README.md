@@ -4,7 +4,7 @@
 
 This MCP (Model Context Protocol) server bridges Figma designs and your Angular + Lit codebase. The primary flow converts Figma frames into pixel-perfect Angular component code (`.ts` + `.html` + `.scss`), automatically choosing **Lit custom elements** for UI primitives (buttons, inputs, badges, icons) and **Angular components** for feature-level containers (cards, page shells, forms). The server indexes both component libraries into a local SQLite database so Claude Code has deep knowledge of your actual component APIs.
 
-The secondary flow goes the other direction: it parses Angular templates and generates Figma Plugin scripts that recreate your components as Figma frames. A token sync tool matches your SCSS variables to Figma styles and generates update scripts to keep designs and code in lockstep.
+The reverse direction — generating a Figma design from an existing Angular component — lives in a separate sibling project, [`angular-to-figma-mcp`](../angular-to-figma-mcp), since it needs a live Figma-plugin bridge rather than the read-only Figma REST API this server uses.
 
 ## Quick Start
 
@@ -202,8 +202,6 @@ To intentionally update a baseline after a deliberate visual change, delete its 
 | `codegen_from_file` | Generate code for an entire page (`maxFrames`, default 30; extras reported, not dropped) |
 | `codegen_validate` | Pixel-diff comparison |
 | `codegen_diff` | Detect design changes since the last run for a selector (style diff needs a prior snapshot — first run establishes the baseline) |
-| `sync_to_figma` | Generate Figma Plugin script from component |
-| `sync_update_tokens` | Sync SCSS tokens to Figma styles |
 
 ## Troubleshooting
 
