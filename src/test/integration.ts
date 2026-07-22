@@ -4,6 +4,17 @@ import * as fs from 'fs';
 
 // __dirname is available in CommonJS (tsc compiles to CJS)
 const __dirname_resolved = __dirname;
+
+// Must be set before any ComponentIndex is constructed (each one reads DB_PATH from the
+// environment at construction time — see componentIndex.ts). Without this, indexing the
+// fixtures below (my-badge, my-button, my-input, app-page-shell, app-user-card, ...) writes
+// straight into the same production database every real project's codegen calls search
+// against, so every project searching for e.g. an "input" or "button" component gets these
+// fixtures back as false-positive matches. runCorpus.ts (the visual regression suite) already
+// isolates its own DB the same way — this brings integration.ts in line with that convention.
+const TEST_DB_PATH = path.resolve(__dirname_resolved, '..', '..', 'data', 'integration-test-component-map.db');
+process.env.DB_PATH = TEST_DB_PATH;
+
 import { libIndexComponents } from '../tools/library/indexComponents.js';
 import { libIndexLit } from '../tools/library/indexLit.js';
 import { libSearchComponent } from '../tools/library/searchComponent.js';
@@ -13,6 +24,10 @@ import { LayoutAnalyzer } from '../services/layoutAnalyzer.js';
 import { CodeGenerator, AssetFetcher } from '../services/codeGenerator.js';
 import { FigmaNode, FigmaVariablesResponse } from '../services/figmaClient.js';
 import { VariableResolver } from '../services/variableResolver.js';
+import { metricsTracker } from '../services/metrics.js';
+import { metricsReport } from '../tools/metrics/report.js';
+import { metricsRecordLlmUsage } from '../tools/metrics/recordUsage.js';
+import { estimateTokens } from '../utils/tokenEstimate.js';
 
 const FIXTURES = path.resolve(__dirname_resolved, 'fixtures');
 const ANGULAR_FIXTURES = path.join(FIXTURES, 'sample-components');
@@ -414,6 +429,33 @@ async function run(): Promise<void> {
       `Expected at least one truncated node, got ${JSON.stringify(truncatedNodes)}`);
   } catch (err) {
     assert('codegen: depth truncation reporting', false, String(err));
+  }
+
+  // Test 19: Token metrics tracking (per-tool estimates + client-reported usage + reset)
+  try {
+    metricsTracker.reset();
+    assert('estimateTokens: ~4 chars per token', estimateTokens('a'.repeat(400)) === 100,
+      `Expected 100, got ${estimateTokens('a'.repeat(400))}`);
+
+    metricsTracker.recordToolCall('test_tool', 100, 50, 10);
+    const afterCall = await metricsReport({ scope: 'session' });
+    assert('metrics_report: session totals reflect recorded tool call',
+      afterCall.totals.totalTokens === 150 && afterCall.byTool[0]?.tool === 'test_tool',
+      `Expected totalTokens 150 with test_tool, got ${JSON.stringify(afterCall)}`);
+
+    await metricsRecordLlmUsage({ stage: 'test-stage', model: 'test-model', inputTokens: 20, outputTokens: 5 });
+    const afterExternal = await metricsReport({ scope: 'session' });
+    assert('metrics_record_llm_usage: appears in reportedByStage',
+      afterExternal.reportedByStage.some(s => s.models.includes('test-model') && s.totalTokens === 25),
+      `Expected a reportedByStage entry for test-model totaling 25, got ${JSON.stringify(afterExternal.reportedByStage)}`);
+
+    const resetReport = await metricsReport({ scope: 'session', reset: true });
+    const afterReset = await metricsReport({ scope: 'session' });
+    assert('metrics_report: reset:true clears the session tally after reporting',
+      resetReport.totals.totalTokens === 175 && afterReset.totals.totalTokens === 0,
+      `Expected reset report to still show prior totals and next report to be 0, got reset=${JSON.stringify(resetReport.totals)} after=${JSON.stringify(afterReset.totals)}`);
+  } catch (err) {
+    assert('metrics: token tracking, reporting, and reset', false, String(err));
   }
 
   // Print results

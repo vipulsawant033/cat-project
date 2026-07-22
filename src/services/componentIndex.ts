@@ -2,6 +2,7 @@ import Database from 'better-sqlite3';
 import * as path from 'path';
 import * as fs from 'fs';
 import { logger } from '../utils/logger.js';
+import { projectPath } from '../utils/paths.js';
 
 export type ComponentType = 'angular' | 'lit';
 
@@ -60,7 +61,7 @@ export class ComponentIndex {
   private db: Database.Database;
 
   constructor() {
-    const dbPath = path.resolve(process.env.DB_PATH || './data/component-map.db');
+    const dbPath = process.env.DB_PATH ? path.resolve(process.env.DB_PATH) : projectPath('data', 'component-map.db');
     const dir = path.dirname(dbPath);
     if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
 

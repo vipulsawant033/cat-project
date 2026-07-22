@@ -168,8 +168,9 @@ export class FigmaClient {
     }
 
     const start = Date.now();
+    const maxAttempts = 3;
     let attempt = 0;
-    while (attempt < 3) {
+    while (attempt < maxAttempts) {
       try {
         const response = await this.client.request<T>({ method, url, params });
         const elapsed = Date.now() - start;
@@ -177,18 +178,31 @@ export class FigmaClient {
         if (method === 'GET') cacheSet(cacheKey, response.data);
         return response.data;
       } catch (err: unknown) {
-        const axiosErr = err as { response?: { status: number }; message: string };
-        if (axiosErr.response?.status === 429) {
-          attempt++;
+        const axiosErr = err as { response?: { status: number; data?: unknown }; message: string };
+        const status = axiosErr.response?.status;
+        // 429 (rate limited) and 5xx (transient upstream failure — Figma's render/API service
+        // occasionally blips on its own, independent of anything about this request) are both
+        // worth a retry with backoff. Anything else (4xx client errors: bad node id, bad token,
+        // etc.) is not going to succeed on retry, so fail fast.
+        const retryable = status === 429 || (status !== undefined && status >= 500);
+        attempt++;
+        if (retryable && attempt < maxAttempts) {
           const delay = Math.pow(2, attempt) * 1000;
-          logger.warn('Rate limited, retrying', { attempt, delay });
+          logger.warn('Figma API call failed, retrying', { method, url, status, attempt, delay });
           await new Promise(r => setTimeout(r, delay));
-        } else {
-          throw err;
+          continue;
         }
+        // Surface Figma's actual response body (it usually includes a human-readable `err`
+        // message) instead of axios's generic "Request failed with status code NNN" — that
+        // generic message gives no way to tell a bad request apart from, say, a node too
+        // large/complex for Figma's render service to rasterize.
+        const detail = axiosErr.response?.data ? ` — ${JSON.stringify(axiosErr.response.data)}` : '';
+        throw new Error(
+          `Figma API request failed: ${method} ${url} (status ${status ?? 'unknown'})${detail}`
+        );
       }
     }
-    throw new Error('Max retries exceeded for Figma API');
+    throw new Error(`Figma API request failed after ${maxAttempts} attempts: ${method} ${url}`);
   }
 
   async getFile(fileKey: string, opts?: { depth?: number }): Promise<FigmaFile> {
@@ -208,14 +222,32 @@ export class FigmaClient {
   }
 
   async exportImage(fileKey: string, nodeId: string, scale: number, format: 'png' | 'svg'): Promise<string> {
-    const result = await this.request<{ images: Record<string, string> }>(
+    // Figma's /images endpoint returns HTTP 200 with `images[nodeId]: null` (rather than an
+    // HTTP error) when it can't rasterize a node — most commonly because the node/subtree is
+    // too large or complex for its render service. request() already retries real 5xx errors;
+    // this null-url case needs its own message since there's no failed HTTP status to report.
+    const result = await this.request<{ images: Record<string, string | null>; err?: string }>(
       'GET', `/images/${fileKey}`, { ids: nodeId, scale, format }
     );
+    if (result.err) {
+      throw new Error(`Figma image export failed for node ${nodeId}: ${result.err}`);
+    }
     const url = result.images[nodeId];
-    if (!url) throw new Error(`No image URL returned for node ${nodeId}`);
+    if (!url) {
+      throw new Error(
+        `Figma could not render an image for node ${nodeId} — it returned no error, just no ` +
+        `image. This usually means the node/subtree is too large or complex to rasterize in one ` +
+        `export. Try exporting a smaller child node instead, or lowering scale.`
+      );
+    }
 
-    const imgResponse = await axios.get<Buffer>(url, { responseType: 'arraybuffer' });
-    return Buffer.from(imgResponse.data).toString('base64');
+    try {
+      const imgResponse = await axios.get<Buffer>(url, { responseType: 'arraybuffer', timeout: 60000 });
+      return Buffer.from(imgResponse.data).toString('base64');
+    } catch (err: unknown) {
+      const axiosErr = err as { message: string };
+      throw new Error(`Failed to download exported image for node ${nodeId} from Figma's CDN: ${axiosErr.message}`);
+    }
   }
 
   async getStyles(fileKey: string): Promise<{ meta: { styles: Array<{ node_id: string; name: string; style_type: string }> } }> {

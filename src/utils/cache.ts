@@ -1,5 +1,6 @@
 import * as fs from 'fs';
 import * as path from 'path';
+import { projectPath } from './paths.js';
 
 interface CacheEntry<T> {
   data: T;
@@ -10,7 +11,7 @@ interface CacheStore {
   [key: string]: CacheEntry<unknown>;
 }
 
-const CACHE_PATH = path.resolve(process.env.CACHE_PATH || './data/token-cache.json');
+const CACHE_PATH = process.env.CACHE_PATH ? path.resolve(process.env.CACHE_PATH) : projectPath('data', 'token-cache.json');
 const TTL_MS = (parseInt(process.env.CACHE_TTL_SECONDS || '300', 10)) * 1000;
 
 function load(): CacheStore {

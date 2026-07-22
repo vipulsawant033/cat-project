@@ -9,6 +9,19 @@ export type ComponentTypePreference = 'angular' | 'lit' | 'auto';
 /** Max recursion depth for IR generation. Configurable since real screens can nest well past 8-10 levels. */
 const MAX_IR_DEPTH = parseInt(process.env.CODEGEN_MAX_DEPTH || '16', 10);
 
+/**
+ * Minimum confidence to auto-wire a matched library component in place of generic HTML.
+ * Deterministic matches (explicit `lib_map_figma_to_component` mappings, or a
+ * `@figma-component` annotation baked into the component's own source) always score 1.0 and
+ * clear this comfortably. Fuzzy name-based matches are what this threshold actually gates:
+ * plain substring containment (e.g. Figma layer "Card" containing/contained-by "app-card") is
+ * too weak a signal to trust on its own — the component index is shared across every project
+ * that has ever run `lib_index_components` against this MCP server, so generic single-word
+ * layer names routinely collide with unrelated components from a completely different project.
+ * Only real word-level overlap (capped at 0.9, see computeConfidence) clears this bar.
+ */
+const MATCH_CONFIDENCE_THRESHOLD = 0.7;
+
 export interface AssetFetcher {
   /** Returns base64-encoded asset content (PNG bytes, or SVG XML text) for the given node. */
   exportAsset(nodeId: string, format: 'png' | 'svg'): Promise<string>;
@@ -74,6 +87,19 @@ export interface GeneratedCode {
 }
 
 export class CodeGenerator {
+  /**
+   * Figma layer names are frequently reused across totally unrelated elements ("Vector",
+   * "Header", "Frame 211", ...). Class names derive directly from those names, and both the
+   * generated HTML and SCSS are flat (not scoped by DOM ancestry), so unmodified duplicate
+   * names collide in the final stylesheet: the last-declared rule for a given class silently
+   * wins the CSS cascade for every element sharing that name, no matter how unrelated they are.
+   * This registry disambiguates repeats (first occurrence keeps the plain name, subsequent ones
+   * get `-2`, `-3`, ...) so every emitted class is unique within a single generation call.
+   * A fresh CodeGenerator instance is constructed per codegen call (see fromNode.ts), so this
+   * naturally resets per call and never leaks class numbering across unrelated generations.
+   */
+  private usedClassNames = new Map<string, number>();
+
   constructor(
     private index: ComponentIndex,
     private tokenMapper: TokenMapper,
@@ -81,7 +107,24 @@ export class CodeGenerator {
     private assetFetcher?: AssetFetcher,
   ) {}
 
-  async figmaNodeToIR(node: FigmaNode, preferType?: ComponentTypePreference, depth = 0, parent?: FigmaNode): Promise<IRNode> {
+  private uniqueClassName(baseName: string): string {
+    const seenCount = this.usedClassNames.get(baseName) || 0;
+    this.usedClassNames.set(baseName, seenCount + 1);
+    return seenCount === 0 ? baseName : `${baseName}-${seenCount + 1}`;
+  }
+
+  async figmaNodeToIR(
+    node: FigmaNode,
+    preferType?: ComponentTypePreference,
+    depth = 0,
+    parent?: FigmaNode,
+    skipComponentMatch = false,
+  ): Promise<IRNode> {
+    // Reset per top-level call, not per instance: callers that generate multiple independent
+    // components off one shared CodeGenerator (e.g. codegen_from_file looping over frames)
+    // must not carry class-uniqueness numbering over from an unrelated previous component.
+    if (depth === 0) this.usedClassNames.clear();
+
     const layout = this.layoutAnalyzer.analyze(node, parent);
     const cssLayout = this.layoutToCSSRecord(layout);
     const cssStyles = this.extractCSSStyles(node);
@@ -96,29 +139,31 @@ export class CodeGenerator {
       children: [],
       text: node.type === 'TEXT' ? node.characters : undefined,
       figmaVariantProps: node.variantProperties,
-      className: this.nodeNameToClass(node.name),
+      className: this.uniqueClassName(this.nodeNameToClass(node.name)),
     };
 
     if ((irType === 'image' || irType === 'icon') && this.assetFetcher) {
       await this.attachAsset(ir, node, irType);
     }
 
-    // Try to match a component
-    const match = this.findComponentMatch(node, preferType);
-    if (match && match.confidence > 0.5) {
-      ir.componentMatch = {
-        selector: match.selector,
-        componentType: match.componentType as 'angular' | 'lit',
-        bindings: this.buildBindings(node, match),
-        slots: this.buildSlots(node, match),
-        confidence: match.confidence,
-      };
+    // Try to match a component, unless the caller explicitly asked for generic markup only.
+    if (!skipComponentMatch) {
+      const match = this.findComponentMatch(node, preferType);
+      if (match && match.confidence >= MATCH_CONFIDENCE_THRESHOLD) {
+        ir.componentMatch = {
+          selector: match.selector,
+          componentType: match.componentType as 'angular' | 'lit',
+          bindings: this.buildBindings(node, match),
+          slots: this.buildSlots(node, match),
+          confidence: match.confidence,
+        };
+      }
     }
 
     const visibleChildren = (node.children || []).filter(child => child.visible !== false);
     if (depth < MAX_IR_DEPTH) {
       ir.children = await Promise.all(
-        visibleChildren.map(child => this.figmaNodeToIR(child, preferType, depth + 1, node))
+        visibleChildren.map(child => this.figmaNodeToIR(child, preferType, depth + 1, node, skipComponentMatch))
       );
     } else if (visibleChildren.length > 0) {
       logger.warn('Max IR depth reached, truncating subtree', { nodeId: node.id, name: node.name, depth });
@@ -185,11 +230,24 @@ export class CodeGenerator {
     const n = nodeName.toLowerCase().replace(/[^a-z0-9]/g, '');
     const s = selector.toLowerCase().replace(/[^a-z0-9]/g, '');
     if (n === s) return 1.0;
-    if (n.includes(s) || s.includes(n)) return 0.8;
-    const words = n.split(/\s+/);
-    const sWords = s.split(/-/);
-    const overlap = words.filter(w => sWords.some(sw => sw.includes(w) || w.includes(sw))).length;
-    return Math.min(overlap / Math.max(words.length, sWords.length), 0.9);
+
+    // Split on the ORIGINAL strings (before stripping non-alphanumerics) so hyphen/space
+    // word boundaries survive — splitting the already-stripped `s`/`n` on '-' or whitespace
+    // never finds a boundary, since those characters were just removed, so a hyphenated
+    // selector like "pressure-gauge" never actually split into ["pressure","gauge"].
+    const words = nodeName.toLowerCase().split(/[^a-z0-9]+/).filter(Boolean);
+    const sWords = selector.toLowerCase().split(/[^a-z0-9]+/).filter(Boolean);
+    const overlap = words.filter(w => sWords.includes(w)).length;
+    if (overlap > 0) {
+      return Math.min(overlap / Math.max(words.length, sWords.length), 0.9);
+    }
+
+    // No shared whole word — fall back to plain substring containment, but only as a weak
+    // signal. Generic single-word Figma layer names ("Card", "Button", "Header") are
+    // near-universal substrings of similarly generic component selectors from completely
+    // unrelated projects, so this must stay below MATCH_CONFIDENCE_THRESHOLD.
+    if (n.includes(s) || s.includes(n)) return 0.6;
+    return 0;
   }
 
   private buildBindings(node: FigmaNode, match: ComponentRecord): IRBinding[] {
@@ -268,8 +326,7 @@ export class CodeGenerator {
 
   private renderComponent(ir: IRNode): string {
     const match = ir.componentMatch!;
-    const isLit = match.componentType === 'lit';
-    const bindings = match.bindings.map(b => this.renderBinding(b)).join('\n  ');
+    const bindingsStr = match.bindings.map(b => this.renderBinding(b)).join(' ');
 
     const childContent = ir.children.map(c => this.irToTemplate(c)).join('\n  ');
     const slotContent = match.slots
@@ -278,10 +335,17 @@ export class CodeGenerator {
         : childContent)
       .join('\n  ');
 
-    return `<${match.selector}
-  ${bindings}
-  ${slotContent || childContent}>
-</${match.selector}>`;
+    const content = slotContent || childContent;
+    const openTag = bindingsStr ? `<${match.selector} ${bindingsStr}>` : `<${match.selector}>`;
+
+    // The opening tag must close with '>' immediately after its attributes — closing it only
+    // after the child content (as this used to do) produces invalid HTML: browsers/Angular's
+    // template parser then treat the child markup as bogus attribute text on the open tag, and
+    // leave a stray '>' and/or a dangling extra close tag behind once the real '>' is reached.
+    if (!content) {
+      return `${openTag}</${match.selector}>`;
+    }
+    return `${openTag}\n  ${content}\n</${match.selector}>`;
   }
 
   private renderBinding(b: IRBinding): string {
@@ -460,6 +524,10 @@ export class ${this.toPascalCase(componentName)}Component {}
    * visible fills as stacked `background-image` entries when more than one is present.
    * Only the first fill was previously read — losing anything painted underneath a
    * top color/gradient layer (e.g. a color fill covered by a gradient overlay).
+   *
+   * TEXT nodes are a special case: a Figma fill on a text layer paints the glyphs, which
+   * is CSS `color`, not `background-color` — using `background-color` there paints a solid
+   * block behind the (default black) text instead of coloring the text itself.
    */
   private applyFills(styles: Record<string, string>, node: FigmaNode): void {
     const visibleFills = (node.fills || [])
@@ -467,6 +535,24 @@ export class ${this.toPascalCase(componentName)}Component {}
       .filter(f => f.fill.visible !== false);
 
     if (visibleFills.length === 0) return;
+
+    const isText = node.type === 'TEXT';
+
+    if (isText) {
+      // Figma lists the topmost painted layer last; for text, only the top layer is
+      // visually meaningful as a solid glyph color.
+      const { fill, index } = visibleFills[visibleFills.length - 1];
+      if (fill.type === 'SOLID' && fill.color) {
+        const boundVariableId = node.boundVariables?.fills?.[index]?.id;
+        styles['color'] = this.tokenMapper.mapColor(fill.color, boundVariableId).rawValue;
+      } else if (fill.type.startsWith('GRADIENT_')) {
+        styles['background-image'] = this.tokenMapper.mapPaint(fill).rawValue;
+        styles['-webkit-background-clip'] = 'text';
+        styles['background-clip'] = 'text';
+        styles['color'] = 'transparent';
+      }
+      return;
+    }
 
     if (visibleFills.length === 1) {
       const { fill, index } = visibleFills[0];

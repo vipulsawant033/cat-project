@@ -1,10 +1,15 @@
 import * as path from 'path';
+import * as http from 'http';
+import { randomUUID } from 'crypto';
 import * as dotenv from 'dotenv';
 dotenv.config({ path: path.join(__dirname, '..', '.env') });
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
+import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import { CallToolRequestSchema, ListToolsRequestSchema } from '@modelcontextprotocol/sdk/types.js';
 import { logger } from './utils/logger.js';
+import { estimateTokens } from './utils/tokenEstimate.js';
+import { metricsTracker } from './services/metrics.js';
 
 // Tool implementations
 import { figmaGetFile } from './tools/figma/getFile.js';
@@ -24,11 +29,20 @@ import { codegenFromNode } from './tools/codegen/fromNode.js';
 import { codegenFromFile } from './tools/codegen/fromFile.js';
 import { codegenValidate } from './tools/codegen/validate.js';
 import { codegenDiff } from './tools/codegen/diff.js';
+import { metricsReport } from './tools/metrics/report.js';
+import { metricsRecordLlmUsage } from './tools/metrics/recordUsage.js';
 
 const args = process.argv.slice(2);
 const watchMode = args.includes('--watch');
 const indexOnly = args.includes('--index-only');
 const indexLitOnly = args.includes('--index-lit-only');
+const httpMode = args.includes('--http') || process.env.MCP_TRANSPORT === 'http';
+
+// Tools whose response marks the end of generating one screen/component. Their
+// result gets a _tokenUsage summary attached, and the running session tally then
+// resets so the next screen starts its own clean count (full history persists in
+// data/metrics-log.json regardless, see metrics_report({ scope: 'all' })).
+const SCREEN_GENERATION_TOOLS = new Set(['codegen_from_file', 'codegen_from_node']);
 
 const TOOLS = [
   {
@@ -195,7 +209,7 @@ const TOOLS = [
   },
   {
     name: 'codegen_from_node',
-    description: 'Generates pixel-perfect Angular component code (.ts + .html + .scss) from a Figma node. Automatically uses Lit custom elements for UI primitives and Angular components for feature containers. USE THIS as the main code generation call after inspecting the design with figma_get_node.',
+    description: 'Generates pixel-perfect Angular component code (.ts + .html + .scss) from a Figma node. Automatically uses Lit custom elements for UI primitives and Angular components for feature containers. USE THIS as the main code generation call after inspecting the design with figma_get_node. The response includes a _tokenUsage breakdown of every tool call made since the last screen was generated, and resets that tally afterward — see metrics_report for on-demand or all-time totals.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -211,7 +225,7 @@ const TOOLS = [
   },
   {
     name: 'codegen_from_file',
-    description: 'Generates Angular component code for all frames in a Figma page. USE THIS for generating an entire page or screen worth of components at once.',
+    description: 'Generates Angular component code for all frames in a Figma page. USE THIS for generating an entire page or screen worth of components at once. The response includes a _tokenUsage breakdown of every tool call made since the last screen was generated, and resets that tally afterward — see metrics_report for on-demand or all-time totals.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -249,6 +263,32 @@ const TOOLS = [
       required: ['fileKey', 'nodeId', 'selector'],
     },
   },
+  {
+    name: 'metrics_report',
+    description: 'Reports estimated token usage per tool/stage. USE THIS AFTER generating a screen (or at any point) to see how many tokens each tool call has cost so far. scope:"session" (default) covers everything since the last screen was generated or the last reset; scope:"all" aggregates the full persisted history in data/metrics-log.json. Pass reset:true to clear the running session tally after reporting.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        scope: { type: 'string', enum: ['session', 'all'], description: 'Reporting window (default session)' },
+        reset: { type: 'boolean', description: 'Clear the session tally after generating this report (default false)' },
+      },
+    },
+  },
+  {
+    name: 'metrics_record_llm_usage',
+    description: 'Lets the calling client (Claude Code, Cursor, Copilot, etc.) log exact prompt/completion token counts it obtained from its own model, since the MCP server itself only sees tool call payloads and cannot observe your actual LLM usage. USE THIS to complement the automatic per-tool-call estimates in metrics_report with precise, model-specific figures for a given stage.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        stage: { type: 'string', description: 'Label for the stage/step this usage belongs to (e.g. "plan", "codegen_from_node review")' },
+        model: { type: 'string', description: 'Model identifier that generated this usage (e.g. claude-sonnet-5, gpt-5)' },
+        inputTokens: { type: 'number', description: 'Exact prompt/input token count reported by the model' },
+        outputTokens: { type: 'number', description: 'Exact completion/output token count reported by the model' },
+        note: { type: 'string', description: 'Optional free-text context' },
+      },
+      required: ['stage', 'inputTokens', 'outputTokens'],
+    },
+  },
 ];
 
 type ToolArgs = Record<string, unknown>;
@@ -272,6 +312,8 @@ async function runTool(name: string, args: ToolArgs): Promise<unknown> {
     case 'codegen_from_file': return codegenFromFile(args as Parameters<typeof codegenFromFile>[0]);
     case 'codegen_validate': return codegenValidate(args as Parameters<typeof codegenValidate>[0]);
     case 'codegen_diff': return codegenDiff(args as Parameters<typeof codegenDiff>[0]);
+    case 'metrics_report': return metricsReport(args as Parameters<typeof metricsReport>[0]);
+    case 'metrics_record_llm_usage': return metricsRecordLlmUsage(args as Parameters<typeof metricsRecordLlmUsage>[0]);
     default: throw new Error(`Unknown tool: ${name}`);
   }
 }
@@ -309,6 +351,135 @@ async function startWatchMode(): Promise<void> {
   });
 }
 
+// Every MCP client (Claude Code, Cursor, Windsurf, the VS Code/GitHub Copilot MCP
+// integration, or a remote HTTP client) talks to this same handler set, so tool
+// behavior — including token metrics — is identical regardless of which one connects.
+function createMcpServer(): Server {
+  const server = new Server(
+    { name: 'figma-angular-mcp', version: '1.0.0' },
+    { capabilities: { tools: {} } }
+  );
+
+  server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: TOOLS }));
+
+  server.setRequestHandler(CallToolRequestSchema, async (request) => {
+    const { name, arguments: toolArgs } = request.params;
+    logger.debug('Tool called', { name, args: toolArgs });
+
+    const startedAt = Date.now();
+    const inputTokens = estimateTokens(toolArgs || {});
+
+    try {
+      let result = await runTool(name, (toolArgs || {}) as ToolArgs);
+      const outputTokens = estimateTokens(result);
+      metricsTracker.recordToolCall(name, inputTokens, outputTokens, Date.now() - startedAt);
+
+      if (SCREEN_GENERATION_TOOLS.has(name)) {
+        const tokenUsage = metricsTracker.getSessionSummary();
+        metricsTracker.reset();
+        result = { ...(result as Record<string, unknown>), _tokenUsage: tokenUsage };
+      }
+
+      return {
+        content: [{ type: 'text', text: JSON.stringify(result) }],
+      };
+    } catch (err) {
+      metricsTracker.recordToolCall(name, inputTokens, 0, Date.now() - startedAt);
+      const message = err instanceof Error ? err.message : String(err);
+      logger.error('Tool error', { name, error: message });
+      return {
+        content: [{ type: 'text', text: JSON.stringify({ error: message, code: 'TOOL_ERROR' }) }],
+        isError: true,
+      };
+    }
+  });
+
+  return server;
+}
+
+async function startStdioServer(): Promise<void> {
+  const server = createMcpServer();
+  const transport = new StdioServerTransport();
+  await server.connect(transport);
+  logger.info('figma-angular-mcp server started (stdio)', { watchMode });
+}
+
+// Local stdio-based clients (Claude Code, Claude Desktop, Cursor, Windsurf, the
+// VS Code MCP/GitHub Copilot integration) all launch this process directly and talk
+// stdio, so that transport stays the default. Remote/browser-based clients (e.g. a
+// hosted ChatGPT connector) can't spawn a local process, so this HTTP transport lets
+// the same tool set be reached over the network instead.
+async function startHttpServer(): Promise<void> {
+  const port = parseInt(process.env.MCP_HTTP_PORT || '3333', 10);
+  const mcpPath = process.env.MCP_HTTP_PATH || '/mcp';
+  const transports = new Map<string, StreamableHTTPServerTransport>();
+
+  function setCors(res: http.ServerResponse): void {
+    res.setHeader('Access-Control-Allow-Origin', process.env.MCP_HTTP_CORS_ORIGIN || '*');
+    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, DELETE, OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Mcp-Session-Id, mcp-protocol-version');
+    res.setHeader('Access-Control-Expose-Headers', 'Mcp-Session-Id');
+  }
+
+  const httpServer = http.createServer((req, res) => {
+    void (async () => {
+      const url = new URL(req.url || '/', 'http://localhost');
+
+      if (req.method === 'OPTIONS') {
+        setCors(res);
+        res.writeHead(204);
+        res.end();
+        return;
+      }
+
+      if (url.pathname === '/healthz') {
+        res.writeHead(200, { 'Content-Type': 'text/plain' });
+        res.end('ok');
+        return;
+      }
+
+      if (url.pathname !== mcpPath) {
+        res.writeHead(404).end();
+        return;
+      }
+
+      setCors(res);
+
+      try {
+        const sessionId = req.headers['mcp-session-id'] as string | undefined;
+        let transport = sessionId ? transports.get(sessionId) : undefined;
+
+        if (!transport) {
+          transport = new StreamableHTTPServerTransport({
+            sessionIdGenerator: () => randomUUID(),
+            onsessioninitialized: (sid) => {
+              transports.set(sid, transport as StreamableHTTPServerTransport);
+              logger.info('HTTP MCP session initialized', { sessionId: sid });
+            },
+          });
+          transport.onclose = () => {
+            if (transport?.sessionId) transports.delete(transport.sessionId);
+          };
+          const server = createMcpServer();
+          await server.connect(transport);
+        }
+
+        await transport.handleRequest(req, res);
+      } catch (err) {
+        logger.error('HTTP MCP request failed', { error: String(err) });
+        if (!res.headersSent) {
+          res.writeHead(500, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'Internal server error' }));
+        }
+      }
+    })();
+  });
+
+  httpServer.listen(port, () => {
+    logger.info('figma-angular-mcp server started (http)', { port, path: mcpPath, watchMode });
+  });
+}
+
 async function main(): Promise<void> {
   if (indexOnly) {
     logger.info('Running index-only mode for Angular components');
@@ -324,37 +495,13 @@ async function main(): Promise<void> {
     process.exit(0);
   }
 
-  const server = new Server(
-    { name: 'figma-angular-mcp', version: '1.0.0' },
-    { capabilities: { tools: {} } }
-  );
-
-  server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: TOOLS }));
-
-  server.setRequestHandler(CallToolRequestSchema, async (request) => {
-    const { name, arguments: toolArgs } = request.params;
-    logger.debug('Tool called', { name, args: toolArgs });
-
-    try {
-      const result = await runTool(name, (toolArgs || {}) as ToolArgs);
-      return {
-        content: [{ type: 'text', text: JSON.stringify(result) }],
-      };
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      logger.error('Tool error', { name, error: message });
-      return {
-        content: [{ type: 'text', text: JSON.stringify({ error: message, code: 'TOOL_ERROR' }) }],
-        isError: true,
-      };
-    }
-  });
-
   if (watchMode) await startWatchMode();
 
-  const transport = new StdioServerTransport();
-  await server.connect(transport);
-  logger.info('figma-angular-mcp server started', { watchMode });
+  if (httpMode) {
+    await startHttpServer();
+  } else {
+    await startStdioServer();
+  }
 }
 
 main().catch(err => {

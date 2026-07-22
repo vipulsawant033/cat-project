@@ -2,7 +2,7 @@
 
 ## What This Does
 
-This MCP (Model Context Protocol) server bridges Figma designs and your Angular + Lit codebase. The primary flow converts Figma frames into pixel-perfect Angular component code (`.ts` + `.html` + `.scss`), automatically choosing **Lit custom elements** for UI primitives (buttons, inputs, badges, icons) and **Angular components** for feature-level containers (cards, page shells, forms). The server indexes both component libraries into a local SQLite database so Claude Code has deep knowledge of your actual component APIs.
+This MCP (Model Context Protocol) server bridges Figma designs and your Angular + Lit codebase. The primary flow converts Figma frames into pixel-perfect Angular component code (`.ts` + `.html` + `.scss`), automatically choosing **Lit custom elements** for UI primitives (buttons, inputs, badges, icons) and **Angular components** for feature-level containers (cards, page shells, forms). The server indexes both component libraries into a local SQLite database so your AI coding assistant — Claude Code, Cursor, GitHub Copilot, or any other MCP client (see [MCP Configuration](#mcp-configuration)) — has deep knowledge of your actual component APIs.
 
 The reverse direction — generating a Figma design from an existing Angular component — lives in a separate sibling project, [`angular-to-figma-mcp`](../angular-to-figma-mcp), since it needs a live Figma-plugin bridge rather than the read-only Figma REST API this server uses.
 
@@ -34,25 +34,56 @@ npm start
 
 ## MCP Configuration
 
-Add to your Claude Code MCP config (usually `~/.claude/claude_desktop_config.json` or project `.mcp.json`):
+This is a standard [Model Context Protocol](https://modelcontextprotocol.io) server built on the official `@modelcontextprotocol/sdk` — it isn't tied to any one AI client. Nothing in the tool implementations is Claude-specific; any MCP-compatible host (Claude Code, Claude Desktop, Cursor, Windsurf, the VS Code/GitHub Copilot MCP integration, or a remote client) sees the same 19 tools and gets identical behavior.
+
+### Local clients (stdio)
+
+Claude Code, Claude Desktop, Cursor, and Windsurf all launch the server as a local subprocess and speak stdio — this is the default transport, no extra config needed.
+
+**Your `.env` file is the single source of truth.** `dist/index.js` loads `<project>/.env` on every launch regardless of the client's working directory, and every data file (SQLite index, token cache, metrics log) defaults to a path anchored to the project directory rather than the launching process's cwd. So the client config below only needs `command`/`args` — nothing else. Rotate `FIGMA_PAT` (or change any other value) in `.env` once, restart the client, and every MCP client picks up the new value; there's no copy of it to keep in sync elsewhere.
+
+**Claude Code / Claude Desktop** (`~/.claude/claude_desktop_config.json` or project `.mcp.json`):
 
 ```json
 {
   "mcpServers": {
     "figma-angular": {
       "command": "node",
-      "args": ["/absolute/path/to/figma-angular-mcp/dist/index.js"],
-      "env": {
-        "FIGMA_PAT": "your_figma_personal_access_token",
-        "ANGULAR_SOURCE_PATH": "/path/to/your/angular/src",
-        "LIT_SOURCE_PATH": "/path/to/your/lit/components/src",
-        "SCSS_TOKENS_PATH": "/path/to/tokens/_variables.scss",
-        "DB_PATH": "/path/to/figma-angular-mcp/data/component-map.db"
-      }
+      "args": ["/absolute/path/to/figma-angular-mcp/dist/index.js"]
     }
   }
 }
 ```
+
+**Cursor** (`.cursor/mcp.json` in the project, or `~/.cursor/mcp.json` globally) and **Windsurf** (`~/.codeium/windsurf/mcp_config.json`) use the same `mcpServers` shape as above — copy the block verbatim into either file.
+
+**VS Code / GitHub Copilot Chat** (`.vscode/mcp.json` in the project, `~/AppData/Roaming/Code/User/mcp.json` globally, or run "MCP: Add Server" from the command palette) uses `servers` instead of `mcpServers` and `type: "stdio"`:
+
+```json
+{
+  "servers": {
+    "figma-angular": {
+      "type": "stdio",
+      "command": "node",
+      "args": ["/absolute/path/to/figma-angular-mcp/dist/index.js"]
+    }
+  }
+}
+```
+
+**No `.env` file** (e.g. a machine where you'd rather not keep secrets on disk, or a CI/container run): pass the same variables from the [Environment Variables](#environment-variables) table via each client's `env` block instead — anything set there is used as-is (`.env` only fills in values that aren't already set).
+
+### Remote/hosted clients (Streamable HTTP)
+
+A client that can't spawn a local process — a browser-based tool, a hosted ChatGPT connector/custom GPT action, or any other remote MCP client — needs the server reachable over the network instead. Start it in HTTP mode:
+
+```bash
+MCP_TRANSPORT=http MCP_HTTP_PORT=3333 FIGMA_PAT=... ANGULAR_SOURCE_PATH=... LIT_SOURCE_PATH=... node dist/index.js
+```
+
+This exposes the same 19 tools at `POST/GET/DELETE http://<host>:3333/mcp` using the MCP [Streamable HTTP transport](https://modelcontextprotocol.io/docs/concepts/transports#streamable-http) (session-managed via the `Mcp-Session-Id` header) plus a `GET /healthz` check. Point the remote client at that URL; if it's a browser-based client, `MCP_HTTP_CORS_ORIGIN` controls the allowed origin (defaults to `*`).
+
+For production use, put this behind a reverse proxy with TLS and authentication (e.g. an API gateway or `MCP_HTTP_CORS_ORIGIN` pinned to a known origin) — the server itself doesn't implement auth, since that varies by deployment.
 
 ## Environment Variables
 
@@ -62,11 +93,17 @@ Add to your Claude Code MCP config (usually `~/.claude/claude_desktop_config.jso
 | `ANGULAR_SOURCE_PATH` | Yes | Absolute path to Angular project `/src` directory |
 | `LIT_SOURCE_PATH` | Yes | Absolute path to Lit components source directory |
 | `SCSS_TOKENS_PATH` | No | Path to SCSS variables file for token mapping |
-| `DB_PATH` | No | SQLite database path (default: `./data/component-map.db`) |
+| `DB_PATH` | No | SQLite database path (default: `data/component-map.db` under the project root, regardless of the launching process's working directory) |
 | `CACHE_TTL_SECONDS` | No | Figma API response cache duration (default: 300) |
 | `LOG_LEVEL` | No | `debug` / `info` / `warn` / `error` (default: `info`) |
 | `FIGMA_VARIABLE_MODE` | No | Name of the Figma Variable mode to resolve (e.g. `Light`, `Dark`). Defaults to each collection's default mode. |
 | `CODEGEN_MAX_DEPTH` | No | Max IR recursion depth (default: 16). Subtrees beyond this are reported via `truncated`/`truncatedNodes` in `codegen_from_node`'s output rather than silently dropped. |
+| `MCP_TRANSPORT` | No | `stdio` (default) or `http`. `--http` on the command line does the same thing. |
+| `MCP_HTTP_PORT` | No | Port for HTTP transport (default: `3333`) |
+| `MCP_HTTP_PATH` | No | URL path for the MCP endpoint in HTTP transport (default: `/mcp`) |
+| `MCP_HTTP_CORS_ORIGIN` | No | `Access-Control-Allow-Origin` value for HTTP transport (default: `*`) |
+| `METRICS_LOG_PATH` | No | Where per-tool-call token usage is logged (default: `data/metrics-log.json` under the project root) |
+| `CACHE_PATH` | No | Figma API response cache file (default: `data/token-cache.json` under the project root) |
 
 ## Figma Variables Support
 
@@ -202,6 +239,36 @@ To intentionally update a baseline after a deliberate visual change, delete its 
 | `codegen_from_file` | Generate code for an entire page (`maxFrames`, default 30; extras reported, not dropped) |
 | `codegen_validate` | Pixel-diff comparison |
 | `codegen_diff` | Detect design changes since the last run for a selector (style diff needs a prior snapshot — first run establishes the baseline) |
+| `metrics_report` | Report estimated token usage per tool/stage (see [Token Usage / Metrics](#token-usage--metrics)) |
+| `metrics_record_llm_usage` | Let the calling client log exact prompt/completion token counts for a stage |
+
+## Token Usage / Metrics
+
+Every tool call is automatically measured and recorded — no setup required. Each call's estimated input/output tokens (derived from serialized JSON payload size, ~4 chars/token, since every provider tokenizes slightly differently) are logged to `data/metrics-log.json` and tallied per-tool for the current session.
+
+**Per-screen totals happen automatically.** `codegen_from_node` and `codegen_from_file` — the two "generate a screen" calls — attach a `_tokenUsage` field to their own response summarizing every tool call made since the last screen was generated (e.g. `figma_get_node` → `lib_search_component` → `codegen_from_node`), broken down per tool. The running tally then resets, so the next screen starts its own clean count:
+
+```json
+{
+  "componentName": "product-card",
+  "html": "...",
+  "_tokenUsage": {
+    "totals": { "calls": 3, "inputTokens": 210, "outputTokens": 4820, "totalTokens": 5030 },
+    "byTool": [
+      { "tool": "figma_get_node", "calls": 1, "inputTokens": 40, "outputTokens": 3900, "totalTokens": 3940 },
+      { "tool": "lib_search_component", "calls": 1, "inputTokens": 30, "outputTokens": 260, "totalTokens": 290 },
+      { "tool": "codegen_from_node", "calls": 1, "inputTokens": 140, "outputTokens": 660, "totalTokens": 800 }
+    ]
+  }
+}
+```
+
+**On-demand or all-time reports** — call `metrics_report` directly:
+- `metrics_report({})` — current session's running totals per tool (same shape as `_tokenUsage` above).
+- `metrics_report({ scope: "all" })` — aggregates the full persisted history in `data/metrics-log.json`, across every session/restart.
+- `metrics_report({ reset: true })` — reports, then clears the running tally (useful if you want to checkpoint mid-screen).
+
+**Exact numbers from the client's own model** — the MCP server only ever sees tool call payloads, never your actual LLM prompt/completion, so `byTool` figures are necessarily an estimate. If your client (Claude Code, Cursor, etc.) can report its own real token usage for a stage — e.g. the reasoning/planning step around a tool call — call `metrics_record_llm_usage({ stage, model, inputTokens, outputTokens })` to log the exact figure. These appear alongside the estimates under `reportedByStage` in `metrics_report`'s output and count toward its `totals`.
 
 ## Troubleshooting
 

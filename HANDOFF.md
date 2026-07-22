@@ -11,7 +11,7 @@
 - [ ] Run `npm run index` to index Angular components
 - [ ] Run `npm run index:lit` to index Lit web components
 - [ ] Run `npm test` to verify the integration tests pass
-- [ ] Add the MCP server config to Claude Code (see README for JSON config)
+- [ ] Add the MCP server config to your AI client of choice — Claude Code, Cursor, VS Code/GitHub Copilot, etc. (see README's MCP Configuration section for each client's JSON config)
 - [ ] Test with a simple Figma node ID to verify end-to-end
 
 ## Adding New Components
@@ -49,10 +49,10 @@ Lit:
 
 Get the node ID: In Figma, right-click a master component → "Copy link". The node ID is in the URL after `node-id=`.
 
-**2. Use `lib_map_figma_to_component`** via Claude Code:
+**2. Use `lib_map_figma_to_component`** via your AI client:
 ```
-Ask Claude: "Map Figma component 1234:5678 to the my-button Lit element"
-Claude will call: lib_map_figma_to_component({ figmaComponentId: "1234:5678", selector: "my-button" })
+Ask: "Map Figma component 1234:5678 to the my-button Lit element"
+The assistant will call: lib_map_figma_to_component({ figmaComponentId: "1234:5678", selector: "my-button" })
 ```
 
 ## Adding SCSS Token Mappings

@@ -29,11 +29,10 @@ export async function codegenFromNode(args: {
   const assetFetcher = new FigmaAssetFetcher(client, args.fileKey);
   const generator = new CodeGenerator(index, tokenMapper, layoutAnalyzer, assetFetcher);
 
-  const preferType: ComponentTypePreference = args.forceGeneric
-    ? 'auto'
-    : (args.preferComponentType || 'auto');
+  const preferType: ComponentTypePreference = args.preferComponentType || 'auto';
+  const skipComponentMatch = args.forceGeneric === true;
 
-  const ir = await generator.figmaNodeToIR(node, preferType);
+  const ir = await generator.figmaNodeToIR(node, preferType, 0, undefined, skipComponentMatch);
   const litElements = generator.collectLitElements(ir);
   const hasLit = litElements.length > 0;
   const matchedComponents = generator.collectMatchedComponents(ir);

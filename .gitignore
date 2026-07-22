@@ -15,6 +15,9 @@ data/images/
 data/visual-regression-history.json
 src/test/visual/baselines/*.diff.png
 
+# Token/usage metrics run log (see metrics_report tool)
+data/metrics-log.json
+
 # Dependencies
 node_modules/
 
