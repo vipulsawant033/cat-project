@@ -52,6 +52,8 @@ export interface IrNode {
     sizingMode: 'root' | 'flex' | 'fixed';
     /** Set when this node's parent is not auto-layout — see resolveChildPositioning. */
     positioning?: ResolvedPositioning;
+    /** True when Figma's layoutSizingHorizontal was 'FILL' inside a HORIZONTAL auto-layout parent ("Fill container") — renders as `flex: 1 1 0%` instead of a fixed width. */
+    grow?: boolean;
   };
   style: {
     background?: string;
@@ -62,6 +64,7 @@ export interface IrNode {
     fontFamily?: string;
     fontSize?: number;
     fontWeight?: number;
+    textAlign?: 'left' | 'center' | 'right' | 'justify';
     opacity?: number;
     boxShadow?: string;
     filter?: string;
@@ -93,6 +96,8 @@ export interface ParseOptions {
   resolveMapping?: (figmaComponentKey: string) => ResolvedComponentMapping | undefined;
   /** Resolved absolute positioning for this node, computed by its parent when the parent is not auto-layout. */
   positioning?: ResolvedPositioning;
+  /** The immediate parent's auto-layout direction (undefined if the parent isn't auto-layout) — lets a child tell whether Figma's layoutSizingHorizontal: 'FILL' should translate to a CSS flex-grow. */
+  parentDirection?: IrNode['layout']['direction'];
 }
 
 export function figmaColorToCss(color: FigmaColor, opacity = 1): string {
@@ -292,6 +297,21 @@ function mapAlign(value?: string): string | undefined {
   }
 }
 
+function mapTextAlign(value?: string): 'left' | 'center' | 'right' | 'justify' | undefined {
+  switch (value) {
+    case 'LEFT':
+      return 'left';
+    case 'CENTER':
+      return 'center';
+    case 'RIGHT':
+      return 'right';
+    case 'JUSTIFIED':
+      return 'justify';
+    default:
+      return undefined;
+  }
+}
+
 function classifyKind(node: FigmaNode, isIcon: boolean): IrNode['kind'] {
   if (isIcon) return 'icon';
   if (node.type === 'TEXT') return 'text';
@@ -320,7 +340,15 @@ function sizingModeFor(kind: IrNode['kind'], direction: IrNode['layout']['direct
  * component-instance substitution, and root-level responsive sizing.
  */
 export function figmaNodeToIr(node: FigmaNode, options: ParseOptions = {}): IrNode {
-  const { isRoot = true, iconSvgByNodeId, tokensByVariableId, componentsByNodeId, resolveMapping, positioning } = options;
+  const {
+    isRoot = true,
+    iconSvgByNodeId,
+    tokensByVariableId,
+    componentsByNodeId,
+    resolveMapping,
+    positioning,
+    parentDirection,
+  } = options;
   const svg = iconSvgByNodeId?.[node.id];
   const isIcon = svg !== undefined;
   const componentMapping = resolveInstanceMapping(node, componentsByNodeId, resolveMapping);
@@ -337,7 +365,7 @@ export function figmaNodeToIr(node: FigmaNode, options: ParseOptions = {}): IrNo
   const backgroundLiteral =
     kind !== 'text' && kind !== 'icon' && kind !== 'component'
       ? (gradientFill && paintToBackgroundCss(gradientFill)) ||
-        (fill?.color && figmaColorToCss(fill.color, fill.opacity ?? node.opacity)) ||
+        (fill?.color && figmaColorToCss(fill.color, fill.opacity)) ||
         undefined
       : undefined;
   const background = backgroundLiteral
@@ -355,6 +383,7 @@ export function figmaNodeToIr(node: FigmaNode, options: ParseOptions = {}): IrNo
     : undefined;
 
   const { boxShadow, filter, backdropFilter } = figmaEffectsToCss(node.effects);
+  const grow = parentDirection === 'row' && node.layoutSizingHorizontal === 'FILL';
 
   const ir: IrNode = {
     id: node.id,
@@ -375,6 +404,7 @@ export function figmaNodeToIr(node: FigmaNode, options: ParseOptions = {}): IrNo
       align: mapAlign(node.counterAxisAlignItems),
       sizingMode: sizingModeFor(kind, direction, isRoot),
       positioning,
+      grow: grow || undefined,
     },
     style: {
       background,
@@ -385,6 +415,7 @@ export function figmaNodeToIr(node: FigmaNode, options: ParseOptions = {}): IrNo
       fontFamily: node.style?.fontFamily,
       fontSize: node.style?.fontSize,
       fontWeight: node.style?.fontWeight,
+      textAlign: kind === 'text' ? mapTextAlign(node.style?.textAlignHorizontal) : undefined,
       color,
       boxShadow,
       filter,
@@ -415,6 +446,7 @@ export function figmaNodeToIr(node: FigmaNode, options: ParseOptions = {}): IrNo
                   direction === 'none' && node.absoluteBoundingBox
                     ? resolveChildPositioning(child, node.absoluteBoundingBox)
                     : undefined,
+                parentDirection: direction,
               })
             ),
   };

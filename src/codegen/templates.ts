@@ -139,10 +139,12 @@ function renderCssNode(node: IrNode, classNames: Map<IrNode, string>): string {
     decls.push(`padding: ${top}px ${right}px ${bottom}px ${left}px`);
   }
 
+  if (node.layout.grow) decls.push('flex: 1 1 0%');
+
   const { width, height } = node.layout;
   switch (node.layout.sizingMode) {
     case 'fixed':
-      if (width !== undefined) decls.push(`width: ${Math.round(width)}px`);
+      if (!node.layout.grow && width !== undefined) decls.push(`width: ${Math.round(width)}px`);
       if (height !== undefined) decls.push(`height: ${Math.round(height)}px`);
       break;
     case 'root':
@@ -152,7 +154,8 @@ function renderCssNode(node: IrNode, classNames: Map<IrNode, string>): string {
       if (height !== undefined) decls.push(`min-height: ${Math.round(height)}px`);
       break;
     case 'flex':
-      // Sized by flex children + padding/gap instead of a hardcoded box, so it can reflow.
+      // Sized by flex children + padding/gap instead of a hardcoded box, so it can reflow
+      // (unless `grow` above already pinned it to fill the parent row).
       break;
   }
 
@@ -166,6 +169,7 @@ function renderCssNode(node: IrNode, classNames: Map<IrNode, string>): string {
   if (node.style.fontFamily) decls.push(`font-family: '${node.style.fontFamily}', sans-serif`);
   if (node.style.fontSize) decls.push(`font-size: ${node.style.fontSize}px`);
   if (node.style.fontWeight) decls.push(`font-weight: ${node.style.fontWeight}`);
+  if (node.style.textAlign) decls.push(`text-align: ${node.style.textAlign}`);
   if (node.style.boxShadow) decls.push(`box-shadow: ${node.style.boxShadow}`);
   if (node.style.filter) decls.push(`filter: ${node.style.filter}`);
   if (node.style.backdropFilter) decls.push(`backdrop-filter: ${node.style.backdropFilter}`);

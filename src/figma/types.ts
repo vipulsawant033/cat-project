@@ -79,6 +79,8 @@ export interface FigmaNode {
   primaryAxisAlignItems?: string;
   counterAxisAlignItems?: string;
   constraints?: FigmaLayoutConstraints;
+  /** How this node sizes itself along the horizontal axis inside an auto-layout parent: fixed size, hug its content, or fill the available space. */
+  layoutSizingHorizontal?: 'FIXED' | 'HUG' | 'FILL';
 
   // Appearance
   fills?: FigmaPaint[];
