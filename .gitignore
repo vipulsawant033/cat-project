@@ -4,3 +4,6 @@ output/
 preview-app/
 .env
 *.log
+
+# Derived cache from lib_index_components — regenerate via that tool, don't hand-edit or commit.
+component-library-index.json

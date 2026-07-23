@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "figma-angular-mcp-vipul": {
+      "command": "node",
+      "args": ["dist/index.js"]
+    }
+  }
+}

@@ -3,6 +3,7 @@ import cors from 'cors';
 import express from 'express';
 import { createBridgeRouter } from './routes.js';
 import { shutdownPreview } from '../preview/manager.js';
+import { shutdownBrowser } from '../visual/screenshot.js';
 
 /**
  * Standalone REST bridge for AI tools that don't support MCP directly.
@@ -25,7 +26,11 @@ app.listen(port, () => {
   console.log(`  POST /tools/generate-angular-component`);
 });
 
-// Don't leave an orphaned `ng serve` preview process running after this server exits.
-process.on('SIGINT', () => { shutdownPreview(); process.exit(0); });
-process.on('SIGTERM', () => { shutdownPreview(); process.exit(0); });
+// Don't leave an orphaned `ng serve` preview process or headless browser running after this server exits.
+async function shutdown(): Promise<void> {
+  shutdownPreview();
+  await shutdownBrowser();
+}
+process.on('SIGINT', () => { shutdown().finally(() => process.exit(0)); });
+process.on('SIGTERM', () => { shutdown().finally(() => process.exit(0)); });
 process.on('exit', shutdownPreview);

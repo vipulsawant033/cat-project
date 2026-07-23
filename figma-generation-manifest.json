@@ -1,0 +1,27 @@
+{
+  "qPY6GSXpd5pg9KizTS0gmC:367:9550": {
+    "fileKey": "qPY6GSXpd5pg9KizTS0gmC",
+    "nodeId": "367:9550",
+    "nodeName": "Dashboard (Desktop)",
+    "kind": "page",
+    "figmaContentHash": "af9079ba2b1268ee",
+    "component": {
+      "selector": "app-dashboard-desktop",
+      "className": "DashboardDesktopComponent",
+      "folder": "dashboard-desktop"
+    },
+    "sections": [
+      {
+        "selector": "app-menu-desktop",
+        "className": "MenuDesktopComponent",
+        "folder": "menu-desktop"
+      },
+      {
+        "selector": "app-body",
+        "className": "BodyComponent",
+        "folder": "body"
+      }
+    ],
+    "generatedAt": "2026-07-23T12:30:08.857Z"
+  }
+}

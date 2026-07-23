@@ -4,6 +4,7 @@ import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { GeneratedAngularComponent } from '../codegen/angular-generator.js';
+import type { GeneratedAngularPage } from '../codegen/page-generator.js';
 import type { PreviewResult } from '../types.js';
 import { findAvailablePort, isHttpServerUp } from './port.js';
 
@@ -17,12 +18,15 @@ const PORT_RANGE_START = 4300;
 /** Tracks the dev server this process itself spawned, for reuse and shutdown. */
 let activeServer: { port: number; child: ChildProcess } | null = null;
 
-async function writeGeneratedFiles(component: GeneratedAngularComponent): Promise<void> {
-  const dir = path.join(PREVIEW_DIR, 'src', 'app', 'generated', component.folder);
+async function writeComponentFiles(component: GeneratedAngularComponent, dir: string): Promise<void> {
   await mkdir(dir, { recursive: true });
   for (const file of component.files) {
     await writeFile(path.join(dir, file.fileName), file.content, 'utf-8');
   }
+}
+
+function generatedDirFor(folder: string): string {
+  return path.join(PREVIEW_DIR, 'src', 'app', 'generated', folder);
 }
 
 /**
@@ -130,8 +134,37 @@ export async function ensurePreviewRunning(component: GeneratedAngularComponent)
     };
   }
 
-  await writeGeneratedFiles(component);
+  await writeComponentFiles(component, generatedDirFor(component.folder));
   await wireRootComponent(component);
+
+  const { port, status } = await ensureDevServerRunning();
+  return { status, url: `http://localhost:${port}` };
+}
+
+/**
+ * Same as ensurePreviewRunning, but for a whole generated page: writes the
+ * page's own files plus every section's files (under `sections/<folder>/`
+ * relative to the page, matching the import paths page-generator.ts baked
+ * into the page's .ts file), then wires the page as the app root — Angular
+ * resolves the page's own imports of each section from there.
+ */
+export async function ensurePagePreviewRunning(generated: GeneratedAngularPage): Promise<PreviewResult> {
+  if (!existsSync(PREVIEW_DIR)) {
+    return {
+      status: 'setup-required',
+      message:
+        'No preview workspace found. From the figma-angular-mcp-vipul project root, run ' +
+        '`npm run preview:setup` once (scaffolds a minimal Angular app and installs its dependencies — ' +
+        'takes a few minutes, one-time only), then generate again.',
+    };
+  }
+
+  const pageDir = generatedDirFor(generated.page.folder);
+  await writeComponentFiles(generated.page, pageDir);
+  for (const section of generated.sections) {
+    await writeComponentFiles(section, path.join(pageDir, 'sections', section.folder));
+  }
+  await wireRootComponent(generated.page);
 
   const { port, status } = await ensureDevServerRunning();
   return { status, url: `http://localhost:${port}` };

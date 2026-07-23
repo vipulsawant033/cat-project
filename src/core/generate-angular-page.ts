@@ -4,27 +4,25 @@ import { findIconRoots } from '../figma/icon-detector.js';
 import { figmaNodeToIr } from '../figma/parser.js';
 import { loadTokensByVariableId } from '../figma/tokens.js';
 import { hashFigmaNode } from '../figma/content-hash.js';
-import { generateAngularComponent } from '../codegen/angular-generator.js';
-import { ensurePreviewRunning } from '../preview/manager.js';
+import { generateAngularPage } from '../codegen/page-generator.js';
+import { ensurePagePreviewRunning } from '../preview/manager.js';
 import { getMapping } from '../library/mapping-store.js';
 import { recordGeneration } from '../manifest/store.js';
 import { writeComponentFilesToDisk } from './write-component-files.js';
-import type { GenerateAngularComponentInput, GenerateAngularComponentOutput } from '../types.js';
+import type { GenerateAngularPageInput, GenerateAngularPageOutput } from '../types.js';
 
 /**
- * Core tool logic: Figma link -> parsed IR -> generated Angular component.
- * This is the single implementation shared by the MCP tool and the REST
- * bridge — add new tools here (as their own function) and register them in
- * both src/mcp/server.ts and src/bridge/routes.ts.
+ * Core tool logic: Figma screen link -> parsed IR -> a composing page
+ * component plus one component per top-level section. Shares the same
+ * Figma-fetch/parse pipeline as runGenerateAngularComponent — the only
+ * difference is the codegen step (generateAngularPage instead of
+ * generateAngularComponent) and that writing/serving covers multiple
+ * generated components instead of one.
  */
-export async function runGenerateAngularComponent(
-  input: GenerateAngularComponentInput
-): Promise<GenerateAngularComponentOutput> {
+export async function runGenerateAngularPage(input: GenerateAngularPageInput): Promise<GenerateAngularPageOutput> {
   const client = new FigmaClient({ token: input.figmaToken });
   const { fileKey, nodeId, fileName, node, componentsByNodeId } = await client.resolveNodeFromLink(input.figmaLink);
 
-  // Icons/logos/glyphs are vector subtrees the parser can't reconstruct structurally —
-  // export them as flattened SVGs up front so the parser can treat each as one leaf asset.
   const iconRoots = findIconRoots(node);
   const [iconSvgByNodeId, tokensByVariableId] = await Promise.all([
     client.exportSvgs(fileKey, iconRoots.map((n) => n.id)),
@@ -38,32 +36,38 @@ export async function runGenerateAngularComponent(
     componentsByNodeId,
     resolveMapping: (figmaComponentKey) => getMapping(figmaComponentKey),
   });
-  const component = generateAngularComponent(ir, node.name);
+
+  const { page, sections } = generateAngularPage(ir, node.name);
 
   recordGeneration({
     fileKey,
     nodeId,
     nodeName: node.name,
-    kind: 'component',
+    kind: 'page',
     figmaContentHash: hashFigmaNode(node),
-    component: { selector: component.selector, className: component.className, folder: component.folder },
+    component: { selector: page.selector, className: page.className, folder: page.folder },
+    sections: sections.map((s) => ({ selector: s.selector, className: s.className, folder: s.folder })),
   });
 
-  const output: GenerateAngularComponentOutput = {
+  const output: GenerateAngularPageOutput = {
     source: { fileKey, nodeId, fileName, nodeName: node.name },
-    component,
+    page,
+    sections,
   };
 
   if (input.writeToDisk) {
-    const baseDir = path.resolve(input.outputDir ?? process.env.OUTPUT_DIR ?? './output', component.folder);
+    const baseDir = path.resolve(input.outputDir ?? process.env.OUTPUT_DIR ?? './output', page.folder);
     const writtenPaths: string[] = [];
-    await writeComponentFilesToDisk(component, baseDir, writtenPaths);
+    await writeComponentFilesToDisk(page, baseDir, writtenPaths);
+    for (const section of sections) {
+      await writeComponentFilesToDisk(section, path.join(baseDir, 'sections', section.folder), writtenPaths);
+    }
     output.writtenPaths = writtenPaths;
   }
 
   if (input.serve) {
     try {
-      output.preview = await ensurePreviewRunning(component);
+      output.preview = await ensurePagePreviewRunning({ page, sections });
     } catch (err) {
       output.preview = {
         status: 'error',
