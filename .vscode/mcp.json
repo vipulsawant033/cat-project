@@ -1,0 +1,20 @@
+{
+  "inputs": [
+    {
+      "type": "promptString",
+      "id": "figma-token",
+      "description": "Figma personal access token (Figma > Settings > Personal access tokens)",
+      "password": true
+    }
+  ],
+  "servers": {
+    "figma-angular-mcp-vipul": {
+      "type": "stdio",
+      "command": "node",
+      "args": ["${workspaceFolder}/dist/index.js"],
+      "env": {
+        "FIGMA_TOKEN": "${input:figma-token}"
+      }
+    }
+  }
+}
