@@ -7,7 +7,7 @@ import type { GeneratedAngularComponent } from '../codegen/angular-generator.js'
 import type { GeneratedAngularPage } from '../codegen/page-generator.js';
 import type { PreviewResult } from '../types.js';
 import { findAvailablePort, isHttpServerUp } from './port.js';
-import { writeIconAssetsToDisk } from '../core/write-component-files.js';
+import { writeIconAssetsToDisk, writeImageAssetsToDisk } from '../core/write-component-files.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 /** Two levels up from src/preview (or dist/preview) is the project root. */
@@ -33,6 +33,11 @@ function generatedDirFor(folder: string): string {
 /** Fixed preview-workspace location matching the /icons src the templates already bake in — no config needed since PREVIEW_DIR itself is fixed. */
 function previewIconsDir(): string {
   return path.join(PREVIEW_DIR, 'public', 'icons');
+}
+
+/** Fixed preview-workspace location matching the /images src the templates already bake in — see previewIconsDir. */
+function previewImagesDir(): string {
+  return path.join(PREVIEW_DIR, 'public', 'images');
 }
 
 /**
@@ -142,6 +147,7 @@ export async function ensurePreviewRunning(component: GeneratedAngularComponent)
 
   await writeComponentFiles(component, generatedDirFor(component.folder));
   await writeIconAssetsToDisk(component.iconAssets, previewIconsDir(), []);
+  await writeImageAssetsToDisk(component.imageAssets, previewImagesDir(), []);
   await wireRootComponent(component);
 
   const { port, status } = await ensureDevServerRunning();
@@ -172,6 +178,7 @@ export async function ensurePagePreviewRunning(generated: GeneratedAngularPage):
     await writeComponentFiles(section, path.join(pageDir, 'sections', section.folder));
   }
   await writeIconAssetsToDisk(generated.page.iconAssets, previewIconsDir(), []);
+  await writeImageAssetsToDisk(generated.page.imageAssets, previewImagesDir(), []);
   await wireRootComponent(generated.page);
 
   const { port, status } = await ensureDevServerRunning();

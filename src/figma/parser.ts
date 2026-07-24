@@ -23,6 +23,12 @@ export interface ResolvedPositioning {
   centerY?: boolean;
 }
 
+/** 1-based CSS grid-column-start/grid-row-start for a GRID parent's 'MANUAL'-positioned child. */
+export interface ResolvedGridPlacement {
+  columnStart: number;
+  rowStart: number;
+}
+
 export interface ResolvedComponentMapping {
   angularSelector: string;
   propertyMappings: Record<string, string>;
@@ -33,7 +39,7 @@ export interface IrNode {
   name: string;
   kind: 'container' | 'text' | 'image' | 'icon' | 'component' | 'unknown';
   layout: {
-    direction: 'row' | 'column' | 'none';
+    direction: 'row' | 'column' | 'grid' | 'none';
     gap: number;
     padding: { top: number; right: number; bottom: number; left: number };
     width?: number;
@@ -52,8 +58,17 @@ export interface IrNode {
     sizingMode: 'root' | 'flex' | 'fixed';
     /** Set when this node's parent is not auto-layout — see resolveChildPositioning. */
     positioning?: ResolvedPositioning;
-    /** True when Figma's layoutSizingHorizontal was 'FILL' inside a HORIZONTAL auto-layout parent ("Fill container") — renders as `flex: 1 1 0%` instead of a fixed width. */
-    grow?: boolean;
+    /** True when Figma's layoutSizingHorizontal was 'FILL' inside a HORIZONTAL auto-layout parent ("Fill container") — renders as `flex: 1 1 0%` and suppresses a fixed width. */
+    growWidth?: boolean;
+    /** True when Figma's layoutSizingVertical was 'FILL' inside a VERTICAL auto-layout parent ("Fill container") — renders as `flex: 1 1 0%` and suppresses a fixed height. */
+    growHeight?: boolean;
+    /** Present when direction === 'grid': the CSS grid-template-columns/rows + row/column gaps for this GRID auto-layout container. Figma's gridColumnsSizing/gridRowsSizing are already CSS-compatible track-list syntax. */
+    grid?: { templateColumns?: string; templateRows?: string; rowGap?: number; columnGap?: number };
+    /** Set when this node is a child of a GRID parent whose gridItemsPositioning is 'MANUAL' — translates to CSS grid-column-start/grid-row-start. */
+    gridPlacement?: ResolvedGridPlacement;
+    /** True when Figma's layoutSizingHorizontal/Vertical was 'FILL' inside a GRID parent — renders as width/height: 100% to fill the assigned grid cell (flex-grow has no meaning in a grid context). */
+    fillWidth?: boolean;
+    fillHeight?: boolean;
   };
   style: {
     background?: string;
@@ -73,6 +88,8 @@ export interface IrNode {
   text?: string;
   /** Public asset path for kind === 'icon' nodes, e.g. "/icons/cog-367-9551.svg" (see figma/icon-detector.ts). */
   iconSrc?: string;
+  /** Public asset path for kind === 'image' nodes, e.g. "/images/cat-logo-9-13410.png" (see core/image-assets.ts). */
+  imageSrc?: string;
   /** Present when kind === 'component': the mapped Angular selector + resolved variant/prop values. */
   component?: { selector: string; props: Record<string, string | boolean> };
   children: IrNode[];
@@ -88,6 +105,8 @@ export interface ParseOptions {
   isRoot?: boolean;
   /** node id -> public asset path of its already-written icon .svg file (see core/generate-angular-component.ts). */
   iconSrcByNodeId?: Record<string, string>;
+  /** node id -> public asset path of its already-written image-fill .png file (see core/image-assets.ts). */
+  imageSrcByNodeId?: Record<string, string>;
   /** Figma variable id -> CSS token reference, from figma_extract_tokens — enables var(--token, literal) styling. */
   tokensByVariableId?: Record<string, TokenRef>;
   /** Figma node id (of a main component/set, scoped to the current subtree) -> its stable component key. */
@@ -96,7 +115,9 @@ export interface ParseOptions {
   resolveMapping?: (figmaComponentKey: string) => ResolvedComponentMapping | undefined;
   /** Resolved absolute positioning for this node, computed by its parent when the parent is not auto-layout. */
   positioning?: ResolvedPositioning;
-  /** The immediate parent's auto-layout direction (undefined if the parent isn't auto-layout) — lets a child tell whether Figma's layoutSizingHorizontal: 'FILL' should translate to a CSS flex-grow. */
+  /** Resolved grid-column-start/grid-row-start for this node, computed by its parent when the parent is a 'MANUAL'-positioned GRID. */
+  gridPlacement?: ResolvedGridPlacement;
+  /** The immediate parent's auto-layout direction (undefined if the parent isn't auto-layout) — lets a child tell whether Figma's layoutSizingHorizontal/Vertical: 'FILL' should translate to a CSS flex-grow or grid-cell fill. */
   parentDirection?: IrNode['layout']['direction'];
 }
 
@@ -114,6 +135,10 @@ function firstVisibleSolidPaint(paints?: FigmaPaint[]): FigmaPaint | undefined {
 
 function firstVisibleGradientPaint(paints?: FigmaPaint[]): FigmaPaint | undefined {
   return paints?.find((p) => p.visible !== false && p.type.startsWith('GRADIENT_') && p.gradientStops?.length);
+}
+
+function firstVisibleImagePaint(paints?: FigmaPaint[]): FigmaPaint | undefined {
+  return paints?.find((p) => p.visible !== false && p.type === 'IMAGE');
 }
 
 /**
@@ -315,7 +340,7 @@ function mapTextAlign(value?: string): 'left' | 'center' | 'right' | 'justify' |
 function classifyKind(node: FigmaNode, isIcon: boolean): IrNode['kind'] {
   if (isIcon) return 'icon';
   if (node.type === 'TEXT') return 'text';
-  if (node.type === 'RECTANGLE' && firstVisibleSolidPaint(node.fills)?.type === 'IMAGE') return 'image';
+  if (node.type === 'RECTANGLE' && firstVisibleImagePaint(node.fills)) return 'image';
   if (node.children && node.children.length > 0) return 'container';
   if (node.type === 'FRAME' || node.type === 'GROUP' || node.type === 'COMPONENT' || node.type === 'INSTANCE') {
     return 'container';
@@ -343,10 +368,12 @@ export function figmaNodeToIr(node: FigmaNode, options: ParseOptions = {}): IrNo
   const {
     isRoot = true,
     iconSrcByNodeId,
+    imageSrcByNodeId,
     tokensByVariableId,
     componentsByNodeId,
     resolveMapping,
     positioning,
+    gridPlacement,
     parentDirection,
   } = options;
   const iconSrc = iconSrcByNodeId?.[node.id];
@@ -357,8 +384,15 @@ export function figmaNodeToIr(node: FigmaNode, options: ParseOptions = {}): IrNo
   const gradientFill = firstVisibleGradientPaint(node.fills);
   const stroke = firstVisibleSolidPaint(node.strokes);
   const kind: IrNode['kind'] = componentMapping ? 'component' : classifyKind(node, isIcon);
+  const imageSrc = kind === 'image' ? imageSrcByNodeId?.[node.id] : undefined;
   const direction: IrNode['layout']['direction'] =
-    node.layoutMode === 'HORIZONTAL' ? 'row' : node.layoutMode === 'VERTICAL' ? 'column' : 'none';
+    node.layoutMode === 'HORIZONTAL'
+      ? 'row'
+      : node.layoutMode === 'VERTICAL'
+        ? 'column'
+        : node.layoutMode === 'GRID'
+          ? 'grid'
+          : 'none';
 
   // boundVariables.fills/strokes align by index with the fills/strokes array; approximated here as "the
   // first bound entry", which covers the common single-fill/single-stroke case this parser already targets.
@@ -383,7 +417,19 @@ export function figmaNodeToIr(node: FigmaNode, options: ParseOptions = {}): IrNo
     : undefined;
 
   const { boxShadow, filter, backdropFilter } = figmaEffectsToCss(node.effects);
-  const grow = parentDirection === 'row' && node.layoutSizingHorizontal === 'FILL';
+  const growWidth = parentDirection === 'row' && node.layoutSizingHorizontal === 'FILL';
+  const growHeight = parentDirection === 'column' && node.layoutSizingVertical === 'FILL';
+  const fillWidth = parentDirection === 'grid' && node.layoutSizingHorizontal === 'FILL';
+  const fillHeight = parentDirection === 'grid' && node.layoutSizingVertical === 'FILL';
+  const grid =
+    direction === 'grid'
+      ? {
+          templateColumns: node.gridColumnsSizing,
+          templateRows: node.gridRowsSizing,
+          rowGap: node.gridRowGap,
+          columnGap: node.gridColumnGap,
+        }
+      : undefined;
 
   const ir: IrNode = {
     id: node.id,
@@ -404,7 +450,12 @@ export function figmaNodeToIr(node: FigmaNode, options: ParseOptions = {}): IrNo
       align: mapAlign(node.counterAxisAlignItems),
       sizingMode: sizingModeFor(kind, direction, isRoot),
       positioning,
-      grow: grow || undefined,
+      growWidth: growWidth || undefined,
+      growHeight: growHeight || undefined,
+      grid,
+      gridPlacement,
+      fillWidth: fillWidth || undefined,
+      fillHeight: fillHeight || undefined,
     },
     style: {
       background,
@@ -423,6 +474,7 @@ export function figmaNodeToIr(node: FigmaNode, options: ParseOptions = {}): IrNo
     },
     text: kind === 'text' ? node.characters : undefined,
     iconSrc: isIcon ? iconSrc : undefined,
+    imageSrc,
     component: componentMapping
       ? {
           selector: componentMapping.angularSelector,
@@ -439,12 +491,20 @@ export function figmaNodeToIr(node: FigmaNode, options: ParseOptions = {}): IrNo
               figmaNodeToIr(child, {
                 isRoot: false,
                 iconSrcByNodeId,
+                imageSrcByNodeId,
                 tokensByVariableId,
                 componentsByNodeId,
                 resolveMapping,
                 positioning:
                   direction === 'none' && node.absoluteBoundingBox
                     ? resolveChildPositioning(child, node.absoluteBoundingBox)
+                    : undefined,
+                gridPlacement:
+                  direction === 'grid' &&
+                  node.gridItemsPositioning === 'MANUAL' &&
+                  child.gridColumnAnchorIndex !== undefined &&
+                  child.gridRowAnchorIndex !== undefined
+                    ? { columnStart: child.gridColumnAnchorIndex + 1, rowStart: child.gridRowAnchorIndex + 1 }
                     : undefined,
                 parentDirection: direction,
               })

@@ -6,7 +6,16 @@ import { renderComponentClass, renderStyles, renderTemplate, type UsedComponentI
 export interface GeneratedFile {
   /** Path relative to the component's own folder, e.g. "primary-button.component.ts" */
   fileName: string;
-  content: string;
+  /** Text for source/svg files; raw bytes for binary assets like exported PNGs. */
+  content: string | Buffer;
+}
+
+/** Converts a GeneratedFile's content to a plain string (base64-encoding Buffer content) for JSON-safe tool output. */
+export function serializeGeneratedFile(file: GeneratedFile): { fileName: string; content: string } {
+  return {
+    fileName: file.fileName,
+    content: Buffer.isBuffer(file.content) ? file.content.toString('base64') : file.content,
+  };
 }
 
 export interface GeneratedAngularComponent {
@@ -17,6 +26,8 @@ export interface GeneratedAngularComponent {
   files: GeneratedFile[];
   /** Exported icon .svg files this component's template references by path (see core/generate-angular-component.ts). Written to a shared icons folder, not this component's own folder. */
   iconAssets: GeneratedFile[];
+  /** Exported image-fill .png files this component's template references by path (see core/image-assets.ts). Written to a shared images folder, not this component's own folder. */
+  imageAssets: GeneratedFile[];
 }
 
 /** Recursively collects the distinct Angular selectors used by mapped component-instance nodes in the IR. */
@@ -57,6 +68,8 @@ export interface GenerateAngularComponentOptions {
   localComponents?: UsedComponentImport[];
   /** Exported icon .svg files for this IR's icon nodes, computed by the caller (see core/generate-angular-component.ts) — passed through unchanged onto the returned component. */
   iconAssets?: GeneratedFile[];
+  /** Exported image-fill .png files for this IR's image nodes, computed by the caller (see core/image-assets.ts) — passed through unchanged onto the returned component. */
+  imageAssets?: GeneratedFile[];
 }
 
 /**
@@ -90,5 +103,6 @@ export function generateAngularComponent(
       { fileName: `${names.fileBase}.component.scss`, content: scss },
     ],
     iconAssets: options.iconAssets ?? [],
+    imageAssets: options.imageAssets ?? [],
   };
 }

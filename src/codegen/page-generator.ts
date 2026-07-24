@@ -26,7 +26,8 @@ export interface GeneratedAngularPage {
 export function generateAngularPage(
   ir: IrNode,
   figmaNodeName: string,
-  iconAssets: GeneratedFile[] = []
+  iconAssets: GeneratedFile[] = [],
+  imageAssets: GeneratedFile[] = []
 ): GeneratedAngularPage {
   const sections: GeneratedAngularComponent[] = [];
 
@@ -39,7 +40,7 @@ export function generateAngularPage(
         ...child,
         layout: { ...child.layout, sizingMode: 'root', positioning: undefined },
       };
-      const section = generateAngularComponent(sectionIr, child.name, { iconAssets });
+      const section = generateAngularComponent(sectionIr, child.name, { iconAssets, imageAssets });
       sections.push(section);
 
       return {
@@ -68,6 +69,7 @@ export function generateAngularPage(
       filePath: '(generated in this same call)',
     })),
     iconAssets,
+    imageAssets,
   });
 
   return { page, sections };

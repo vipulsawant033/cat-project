@@ -25,6 +25,8 @@ export interface FigmaPaint {
   gradientStops?: FigmaGradientStop[];
   /** Normalized (0..1) object-space points: [start, end, width-axis] */
   gradientHandlePositions?: { x: number; y: number }[];
+  /** Present when type === 'IMAGE': the hash used to fetch the actual bitmap via the images export endpoint. */
+  imageRef?: string;
 }
 
 export interface FigmaLayoutConstraints {
@@ -70,7 +72,7 @@ export interface FigmaNode {
   absoluteBoundingBox?: { x: number; y: number; width: number; height: number };
   /** Geometry bounds PLUS effects bleed (shadows/blur) — what Figma's image export actually renders to, which can be larger than absoluteBoundingBox. */
   absoluteRenderBounds?: { x: number; y: number; width: number; height: number } | null;
-  layoutMode?: 'NONE' | 'HORIZONTAL' | 'VERTICAL';
+  layoutMode?: 'NONE' | 'HORIZONTAL' | 'VERTICAL' | 'GRID';
   itemSpacing?: number;
   paddingLeft?: number;
   paddingRight?: number;
@@ -79,8 +81,25 @@ export interface FigmaNode {
   primaryAxisAlignItems?: string;
   counterAxisAlignItems?: string;
   constraints?: FigmaLayoutConstraints;
-  /** How this node sizes itself along the horizontal axis inside an auto-layout parent: fixed size, hug its content, or fill the available space. */
+  /** How this node sizes itself along the horizontal/vertical axis inside an auto-layout parent: fixed size, hug its content, or fill the available space. */
   layoutSizingHorizontal?: 'FIXED' | 'HUG' | 'FILL';
+  layoutSizingVertical?: 'FIXED' | 'HUG' | 'FILL';
+
+  // Grid auto-layout (layoutMode: 'GRID') — a distinct auto-layout mode from HORIZONTAL/VERTICAL,
+  // with its own track-sizing and per-child placement fields.
+  gridColumnCount?: number;
+  gridRowCount?: number;
+  gridRowGap?: number;
+  gridColumnGap?: number;
+  /** CSS-compatible grid track-list syntax, e.g. "repeat(4,minmax(0,1fr))" — usable directly as grid-template-columns. */
+  gridColumnsSizing?: string;
+  /** CSS-compatible grid track-list syntax, e.g. "fit-content(100%) 404px" — usable directly as grid-template-rows. */
+  gridRowsSizing?: string;
+  /** 'AUTO' | 'MANUAL' — whether a GRID parent's children carry explicit gridRowAnchorIndex/gridColumnAnchorIndex placement. */
+  gridItemsPositioning?: string;
+  /** Present on a child of a GRID parent when that parent's gridItemsPositioning is 'MANUAL': its 0-based cell coordinates. */
+  gridRowAnchorIndex?: number;
+  gridColumnAnchorIndex?: number;
 
   // Appearance
   fills?: FigmaPaint[];

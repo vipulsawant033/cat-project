@@ -60,7 +60,7 @@ function renderHtmlNode(node: IrNode, classNames: Map<IrNode, string>, depth: nu
   if (node.kind === 'image') {
     return [
       indent(`<div class="${className}">`, depth),
-      indent(`<img class="${className}-asset" [src]="imageSrc" alt="${escapeHtml(node.name)}" />`, depth + 1),
+      indent(`<img class="${className}-asset" src="${node.imageSrc ?? ''}" alt="${escapeHtml(node.name)}" />`, depth + 1),
       indent(`</div>`, depth),
     ].join('\n');
   }
@@ -107,7 +107,20 @@ function renderCssNode(node: IrNode, classNames: Map<IrNode, string>): string {
   // (svg/img/custom-element) with no children in the DOM — e.g. `display: flex` on an <svg> root
   // is undefined/inconsistent across browsers and can make width/max-width stop applying correctly.
   if (node.kind === 'container') {
-    if (node.layout.direction !== 'none') {
+    if (node.layout.direction === 'grid') {
+      decls.push('display: grid');
+      const { templateColumns, templateRows, rowGap, columnGap } = node.layout.grid ?? {};
+      if (templateColumns) decls.push(`grid-template-columns: ${templateColumns}`);
+      if (templateRows) decls.push(`grid-template-rows: ${templateRows}`);
+      if (rowGap !== undefined && rowGap === columnGap) {
+        decls.push(`gap: ${rowGap}px`);
+      } else {
+        if (rowGap) decls.push(`row-gap: ${rowGap}px`);
+        if (columnGap) decls.push(`column-gap: ${columnGap}px`);
+      }
+      if (node.layout.justify) decls.push(`justify-content: ${node.layout.justify}`);
+      if (node.layout.align) decls.push(`align-items: ${node.layout.align}`);
+    } else if (node.layout.direction !== 'none') {
       decls.push('display: flex');
       decls.push(`flex-direction: ${node.layout.direction}`);
       if (node.layout.gap) decls.push(`gap: ${node.layout.gap}px`);
@@ -119,6 +132,11 @@ function renderCssNode(node: IrNode, classNames: Map<IrNode, string>): string {
       // node itself is absolutely positioned below — that already establishes a containing block.
       decls.push('position: relative');
     }
+  }
+
+  if (node.layout.gridPlacement) {
+    decls.push(`grid-column-start: ${node.layout.gridPlacement.columnStart}`);
+    decls.push(`grid-row-start: ${node.layout.gridPlacement.rowStart}`);
   }
 
   if (node.layout.positioning) {
@@ -140,13 +158,19 @@ function renderCssNode(node: IrNode, classNames: Map<IrNode, string>): string {
     decls.push(`padding: ${top}px ${right}px ${bottom}px ${left}px`);
   }
 
-  if (node.layout.grow) decls.push('flex: 1 1 0%');
+  if (node.layout.growWidth || node.layout.growHeight) decls.push('flex: 1 1 0%');
+  if (node.layout.fillWidth) decls.push('width: 100%');
+  if (node.layout.fillHeight) decls.push('height: 100%');
 
   const { width, height } = node.layout;
   switch (node.layout.sizingMode) {
     case 'fixed':
-      if (!node.layout.grow && width !== undefined) decls.push(`width: ${Math.round(width)}px`);
-      if (height !== undefined) decls.push(`height: ${Math.round(height)}px`);
+      if (!node.layout.growWidth && !node.layout.fillWidth && width !== undefined) {
+        decls.push(`width: ${Math.round(width)}px`);
+      }
+      if (!node.layout.growHeight && !node.layout.fillHeight && height !== undefined) {
+        decls.push(`height: ${Math.round(height)}px`);
+      }
       break;
     case 'root':
       decls.push('width: 100%');
@@ -156,7 +180,7 @@ function renderCssNode(node: IrNode, classNames: Map<IrNode, string>): string {
       break;
     case 'flex':
       // Sized by flex children + padding/gap instead of a hardcoded box, so it can reflow
-      // (unless `grow` above already pinned it to fill the parent row).
+      // (unless growWidth/growHeight/fillWidth/fillHeight above already pinned its size).
       break;
   }
 
