@@ -11,7 +11,11 @@ function assignClassNames(root: IrNode): Map<IrNode, string> {
   const assignments = new Map<IrNode, string>();
 
   function visit(node: IrNode) {
-    const base = toKebabCase(node.name) || node.kind;
+    const kebab = toKebabCase(node.name) || node.kind;
+    // CSS class names (and JS identifiers derived from them) can't start with a
+    // digit — text layers named after their own content (e.g. "11:51 AM", "730E")
+    // otherwise produce invalid selectors like `.11-51-am` that fail the SCSS build.
+    const base = /^[0-9]/.test(kebab) ? `n-${kebab}` : kebab;
     const count = used.get(base) ?? 0;
     used.set(base, count + 1);
     const className = count === 0 ? base : `${base}-${count}`;
@@ -31,25 +35,22 @@ function indent(text: string, levels: number): string {
     .join('\n');
 }
 
-/** Strips hardcoded width/height off the exported SVG's root tag and injects our layout class instead. */
-function prepareIconSvg(svg: string, className: string): string {
-  const withoutFixedSize = svg.replace(/\s(width|height)="[^"]*"/g, '');
-  const withClass = withoutFixedSize.replace(/<svg\b/, `<svg class="${className}"`);
-  return withClass.trim();
-}
-
 function renderHtmlNode(node: IrNode, classNames: Map<IrNode, string>, depth: number): string {
   const className = classNames.get(node)!;
 
-  if (node.kind === 'icon' && node.svg) {
+  if (node.kind === 'icon' && node.iconSrc) {
     // <svg>/<img> are CSS "replaced elements" with their own intrinsic-aspect-ratio sizing
     // algorithm, which handles width/max-width/percentage sizing inconsistently across browsers
     // (especially at the component root) — box-sizing CSS lives on a plain wrapping <div>
-    // instead, with the svg just filling it via a separate `-asset` class at 100%/100%.
-    const innerSvg = prepareIconSvg(node.svg, `${className}-asset`);
-    return [indent(`<div class="${className}">`, depth), indent(innerSvg, depth + 1), indent(`</div>`, depth)].join(
-      '\n'
-    );
+    // instead, with the icon just filling it via a separate `-asset` class at 100%/100%. The icon
+    // itself is a real exported .svg file written alongside this component (see
+    // core/generate-angular-component.ts) rather than markup inlined here, so it's inspectable,
+    // cacheable, and immune to string-splicing bugs in the generated HTML.
+    return [
+      indent(`<div class="${className}">`, depth),
+      indent(`<img class="${className}-asset" src="${node.iconSrc}" alt="${escapeHtml(node.name)}" />`, depth + 1),
+      indent(`</div>`, depth),
+    ].join('\n');
   }
 
   if (node.kind === 'text') {

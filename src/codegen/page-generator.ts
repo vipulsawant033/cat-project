@@ -1,5 +1,5 @@
 import type { IrNode } from '../figma/parser.js';
-import { generateAngularComponent, type GeneratedAngularComponent } from './angular-generator.js';
+import { generateAngularComponent, type GeneratedAngularComponent, type GeneratedFile } from './angular-generator.js';
 
 export interface GeneratedAngularPage {
   /** The composing top-level component — its template just references each section's selector. */
@@ -23,7 +23,11 @@ export interface GeneratedAngularPage {
  * *original* layout (positioning/size) so the page places the resulting
  * `<selector>` element exactly where the section sat in the design.
  */
-export function generateAngularPage(ir: IrNode, figmaNodeName: string): GeneratedAngularPage {
+export function generateAngularPage(
+  ir: IrNode,
+  figmaNodeName: string,
+  iconAssets: GeneratedFile[] = []
+): GeneratedAngularPage {
   const sections: GeneratedAngularComponent[] = [];
 
   const pageIr: IrNode = {
@@ -35,7 +39,7 @@ export function generateAngularPage(ir: IrNode, figmaNodeName: string): Generate
         ...child,
         layout: { ...child.layout, sizingMode: 'root', positioning: undefined },
       };
-      const section = generateAngularComponent(sectionIr, child.name);
+      const section = generateAngularComponent(sectionIr, child.name, { iconAssets });
       sections.push(section);
 
       return {
@@ -43,6 +47,15 @@ export function generateAngularPage(ir: IrNode, figmaNodeName: string): Generate
         kind: 'component',
         component: { selector: section.selector, props: {} },
         children: [],
+        // The section's own root (generated with sizingMode: 'root' above) already re-establishes
+        // all decorative styling (background, padding, border, shadow) for itself. Keeping the
+        // *original* node's style/padding here too would double-apply it across two nested boxes:
+        // this placement host in the page template, and the section's own inner root div — e.g. a
+        // padding: 16px on both stacks into an effective 32px, silently shrinking the section's
+        // content area. Only `grow` (how the page's flex row should size this slot) is a genuine
+        // page-level concern and stays.
+        layout: { ...child.layout, padding: { top: 0, right: 0, bottom: 0, left: 0 } },
+        style: {},
       };
     }),
   };
@@ -54,6 +67,7 @@ export function generateAngularPage(ir: IrNode, figmaNodeName: string): Generate
       importFrom: `./sections/${s.folder}/${s.folder}.component`,
       filePath: '(generated in this same call)',
     })),
+    iconAssets,
   });
 
   return { page, sections };

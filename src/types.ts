@@ -25,6 +25,15 @@ export const GenerateAngularComponentInput = z.object({
     .default(false)
     .describe('If true, also writes the generated files under outputDir (or OUTPUT_DIR env var)'),
   outputDir: z.string().optional().describe('Directory to write generated files into when writeToDisk is true'),
+  iconsDir: z
+    .string()
+    .optional()
+    .describe(
+      'Directory to write exported icon .svg files into when writeToDisk is true (or ICONS_DIR env var). ' +
+        'Defaults to ./public/icons — icons are referenced from generated templates as "/icons/<file>", ' +
+        'matching Angular\'s default public/ asset convention, so this should point at the target ' +
+        'workspace\'s public/icons folder (e.g. the consuming app\'s public/icons, not this server\'s own).'
+    ),
   serve: z
     .boolean()
     .optional()
@@ -57,6 +66,8 @@ export interface GenerateAngularComponentOutput {
     className: string;
     folder: string;
     files: { fileName: string; content: string }[];
+    /** Exported icon .svg files referenced by the template's <img src> — written under iconsDir when writeToDisk is true. */
+    iconAssets: { fileName: string; content: string }[];
   };
   writtenPaths?: string[];
   preview?: PreviewResult;
@@ -86,6 +97,15 @@ export const GenerateAngularPageInput = z.object({
     .default(false)
     .describe('If true, also writes the page + every section\'s files under outputDir (or OUTPUT_DIR env var)'),
   outputDir: z.string().optional().describe('Directory to write generated files into when writeToDisk is true'),
+  iconsDir: z
+    .string()
+    .optional()
+    .describe(
+      'Directory to write exported icon .svg files into when writeToDisk is true (or ICONS_DIR env var). ' +
+        'Defaults to ./public/icons — icons are referenced from generated templates as "/icons/<file>", ' +
+        'matching Angular\'s default public/ asset convention, so this should point at the target ' +
+        'workspace\'s public/icons folder (e.g. the consuming app\'s public/icons, not this server\'s own).'
+    ),
   serve: z
     .boolean()
     .optional()
@@ -103,6 +123,8 @@ export interface GeneratedComponentFiles {
   className: string;
   folder: string;
   files: { fileName: string; content: string }[];
+  /** Exported icon .svg files referenced by this component's <img src> — written under iconsDir when writeToDisk is true. */
+  iconAssets: { fileName: string; content: string }[];
 }
 
 export interface GenerateAngularPageOutput {

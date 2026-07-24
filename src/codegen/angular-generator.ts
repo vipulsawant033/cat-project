@@ -15,6 +15,8 @@ export interface GeneratedAngularComponent {
   /** Suggested folder name for the component, e.g. "primary-button" */
   folder: string;
   files: GeneratedFile[];
+  /** Exported icon .svg files this component's template references by path (see core/generate-angular-component.ts). Written to a shared icons folder, not this component's own folder. */
+  iconAssets: GeneratedFile[];
 }
 
 /** Recursively collects the distinct Angular selectors used by mapped component-instance nodes in the IR. */
@@ -53,6 +55,8 @@ function resolveUsedComponents(ir: IrNode, localComponents: UsedComponentImport[
 export interface GenerateAngularComponentOptions {
   /** Sibling components generated in this same call (see page-generator.ts) that this IR references but that aren't in the persisted library index. */
   localComponents?: UsedComponentImport[];
+  /** Exported icon .svg files for this IR's icon nodes, computed by the caller (see core/generate-angular-component.ts) — passed through unchanged onto the returned component. */
+  iconAssets?: GeneratedFile[];
 }
 
 /**
@@ -85,5 +89,6 @@ export function generateAngularComponent(
       { fileName: `${names.fileBase}.component.html`, content: html },
       { fileName: `${names.fileBase}.component.scss`, content: scss },
     ],
+    iconAssets: options.iconAssets ?? [],
   };
 }

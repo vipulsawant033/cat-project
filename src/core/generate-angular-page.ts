@@ -5,10 +5,11 @@ import { figmaNodeToIr } from '../figma/parser.js';
 import { loadTokensByVariableId } from '../figma/tokens.js';
 import { hashFigmaNode } from '../figma/content-hash.js';
 import { generateAngularPage } from '../codegen/page-generator.js';
+import { buildIconAssets } from './icon-assets.js';
 import { ensurePagePreviewRunning } from '../preview/manager.js';
 import { getMapping } from '../library/mapping-store.js';
 import { recordGeneration } from '../manifest/store.js';
-import { writeComponentFilesToDisk } from './write-component-files.js';
+import { writeComponentFilesToDisk, writeIconAssetsToDisk } from './write-component-files.js';
 import type { GenerateAngularPageInput, GenerateAngularPageOutput } from '../types.js';
 
 /**
@@ -28,16 +29,17 @@ export async function runGenerateAngularPage(input: GenerateAngularPageInput): P
     client.exportSvgs(fileKey, iconRoots.map((n) => n.id)),
     loadTokensByVariableId(client, fileKey),
   ]);
+  const { iconAssets, iconSrcByNodeId } = buildIconAssets(iconRoots, iconSvgByNodeId);
 
   const ir = figmaNodeToIr(node, {
     isRoot: true,
-    iconSvgByNodeId,
+    iconSrcByNodeId,
     tokensByVariableId,
     componentsByNodeId,
     resolveMapping: (figmaComponentKey) => getMapping(figmaComponentKey),
   });
 
-  const { page, sections } = generateAngularPage(ir, node.name);
+  const { page, sections } = generateAngularPage(ir, node.name, iconAssets);
 
   recordGeneration({
     fileKey,
@@ -57,11 +59,13 @@ export async function runGenerateAngularPage(input: GenerateAngularPageInput): P
 
   if (input.writeToDisk) {
     const baseDir = path.resolve(input.outputDir ?? process.env.OUTPUT_DIR ?? './output', page.folder);
+    const iconsDir = path.resolve(input.iconsDir ?? process.env.ICONS_DIR ?? './public/icons');
     const writtenPaths: string[] = [];
     await writeComponentFilesToDisk(page, baseDir, writtenPaths);
     for (const section of sections) {
       await writeComponentFilesToDisk(section, path.join(baseDir, 'sections', section.folder), writtenPaths);
     }
+    await writeIconAssetsToDisk(iconAssets, iconsDir, writtenPaths);
     output.writtenPaths = writtenPaths;
   }
 

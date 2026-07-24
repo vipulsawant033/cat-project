@@ -71,8 +71,8 @@ export interface IrNode {
     backdropFilter?: string;
   };
   text?: string;
-  /** Raw SVG markup for kind === 'icon' nodes (see figma/icon-detector.ts). */
-  svg?: string;
+  /** Public asset path for kind === 'icon' nodes, e.g. "/icons/cog-367-9551.svg" (see figma/icon-detector.ts). */
+  iconSrc?: string;
   /** Present when kind === 'component': the mapped Angular selector + resolved variant/prop values. */
   component?: { selector: string; props: Record<string, string | boolean> };
   children: IrNode[];
@@ -86,8 +86,8 @@ export interface TokenRef {
 export interface ParseOptions {
   /** True for the subtree's top-level node; controls layout.sizingMode. */
   isRoot?: boolean;
-  /** node id -> exported SVG markup, from FigmaClient.exportSvgs(). */
-  iconSvgByNodeId?: Record<string, string>;
+  /** node id -> public asset path of its already-written icon .svg file (see core/generate-angular-component.ts). */
+  iconSrcByNodeId?: Record<string, string>;
   /** Figma variable id -> CSS token reference, from figma_extract_tokens — enables var(--token, literal) styling. */
   tokensByVariableId?: Record<string, TokenRef>;
   /** Figma node id (of a main component/set, scoped to the current subtree) -> its stable component key. */
@@ -342,15 +342,15 @@ function sizingModeFor(kind: IrNode['kind'], direction: IrNode['layout']['direct
 export function figmaNodeToIr(node: FigmaNode, options: ParseOptions = {}): IrNode {
   const {
     isRoot = true,
-    iconSvgByNodeId,
+    iconSrcByNodeId,
     tokensByVariableId,
     componentsByNodeId,
     resolveMapping,
     positioning,
     parentDirection,
   } = options;
-  const svg = iconSvgByNodeId?.[node.id];
-  const isIcon = svg !== undefined;
+  const iconSrc = iconSrcByNodeId?.[node.id];
+  const isIcon = iconSrc !== undefined;
   const componentMapping = resolveInstanceMapping(node, componentsByNodeId, resolveMapping);
 
   const fill = firstVisibleSolidPaint(node.fills);
@@ -422,7 +422,7 @@ export function figmaNodeToIr(node: FigmaNode, options: ParseOptions = {}): IrNo
       backdropFilter,
     },
     text: kind === 'text' ? node.characters : undefined,
-    svg: isIcon ? svg : undefined,
+    iconSrc: isIcon ? iconSrc : undefined,
     component: componentMapping
       ? {
           selector: componentMapping.angularSelector,
@@ -438,7 +438,7 @@ export function figmaNodeToIr(node: FigmaNode, options: ParseOptions = {}): IrNo
             .map((child) =>
               figmaNodeToIr(child, {
                 isRoot: false,
-                iconSvgByNodeId,
+                iconSrcByNodeId,
                 tokensByVariableId,
                 componentsByNodeId,
                 resolveMapping,

@@ -5,10 +5,11 @@ import { figmaNodeToIr } from '../figma/parser.js';
 import { loadTokensByVariableId } from '../figma/tokens.js';
 import { hashFigmaNode } from '../figma/content-hash.js';
 import { generateAngularComponent } from '../codegen/angular-generator.js';
+import { buildIconAssets } from './icon-assets.js';
 import { ensurePreviewRunning } from '../preview/manager.js';
 import { getMapping } from '../library/mapping-store.js';
 import { recordGeneration } from '../manifest/store.js';
-import { writeComponentFilesToDisk } from './write-component-files.js';
+import { writeComponentFilesToDisk, writeIconAssetsToDisk } from './write-component-files.js';
 import type { GenerateAngularComponentInput, GenerateAngularComponentOutput } from '../types.js';
 
 /**
@@ -30,15 +31,16 @@ export async function runGenerateAngularComponent(
     client.exportSvgs(fileKey, iconRoots.map((n) => n.id)),
     loadTokensByVariableId(client, fileKey),
   ]);
+  const { iconAssets, iconSrcByNodeId } = buildIconAssets(iconRoots, iconSvgByNodeId);
 
   const ir = figmaNodeToIr(node, {
     isRoot: true,
-    iconSvgByNodeId,
+    iconSrcByNodeId,
     tokensByVariableId,
     componentsByNodeId,
     resolveMapping: (figmaComponentKey) => getMapping(figmaComponentKey),
   });
-  const component = generateAngularComponent(ir, node.name);
+  const component = generateAngularComponent(ir, node.name, { iconAssets });
 
   recordGeneration({
     fileKey,
@@ -56,8 +58,10 @@ export async function runGenerateAngularComponent(
 
   if (input.writeToDisk) {
     const baseDir = path.resolve(input.outputDir ?? process.env.OUTPUT_DIR ?? './output', component.folder);
+    const iconsDir = path.resolve(input.iconsDir ?? process.env.ICONS_DIR ?? './public/icons');
     const writtenPaths: string[] = [];
     await writeComponentFilesToDisk(component, baseDir, writtenPaths);
+    await writeIconAssetsToDisk(component.iconAssets, iconsDir, writtenPaths);
     output.writtenPaths = writtenPaths;
   }
 
