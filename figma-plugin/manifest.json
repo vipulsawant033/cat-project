@@ -1,0 +1,12 @@
+{
+  "name": "Angular -> Figma Bridge",
+  "id": "figma-angular-bridge",
+  "api": "1.0.0",
+  "main": "code.js",
+  "ui": "ui.html",
+  "editorType": ["figma"],
+  "networkAccess": {
+    "allowedDomains": ["http://localhost:8787", "ws://localhost:8787"],
+    "reasoning": "Connects to the local MCP bridge to receive build plans."
+  }
+}

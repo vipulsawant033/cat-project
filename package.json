@@ -1,0 +1,34 @@
+{
+  "name": "figma-angular-sync",
+  "version": "0.1.0",
+  "description": "Bidirectional pixel-perfect Figma <-> Angular MCP server. Deterministic transforms + one-shot pixel-diff validation + per-screen/per-stage token accounting. Model-agnostic (Claude / ChatGPT / GitHub Copilot / any MCP host).",
+  "type": "module",
+  "bin": {
+    "figma-angular-sync": "dist/index.js"
+  },
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "dev": "tsc -w -p tsconfig.json",
+    "start": "node dist/index.js",
+    "test": "node --test dist/**/*.test.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.0.0",
+    "dotenv": "^17.4.2",
+    "pixelmatch": "^6.0.0",
+    "playwright": "^1.47.0",
+    "pngjs": "^7.0.0",
+    "ws": "^8.18.0",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@types/node": "^20.14.0",
+    "@types/pngjs": "^6.0.5",
+    "@types/ws": "^8.5.12",
+    "typescript": "^5.5.0"
+  }
+}

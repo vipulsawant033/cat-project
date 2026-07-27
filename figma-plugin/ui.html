@@ -1,0 +1,45 @@
+<!-- The plugin UI runs in an iframe that CAN open a WebSocket (the plugin sandbox
+     cannot). It relays messages between the bridge socket and the plugin sandbox
+     via postMessage. -->
+<!doctype html>
+<meta charset="utf-8" />
+<style>
+  body { font: 12px/1.4 sans-serif; padding: 12px; }
+  #status { font-weight: 600; }
+  .ok { color: #0a7f27; }
+  .bad { color: #c0392b; }
+</style>
+<p>Angular → Figma bridge</p>
+<p>Bridge: <span id="status" class="bad">disconnected</span></p>
+<script>
+  const BRIDGE_URL = "ws://localhost:8787";
+  const statusEl = document.getElementById("status");
+  let ws;
+
+  function connect() {
+    ws = new WebSocket(BRIDGE_URL);
+    ws.onopen = () => {
+      statusEl.textContent = "connected";
+      statusEl.className = "ok";
+    };
+    ws.onclose = () => {
+      statusEl.textContent = "disconnected — retrying";
+      statusEl.className = "bad";
+      setTimeout(connect, 2000);
+    };
+    // bridge -> plugin sandbox
+    ws.onmessage = (ev) => {
+      const msg = JSON.parse(ev.data);
+      parent.postMessage({ pluginMessage: msg }, "*");
+    };
+  }
+  connect();
+
+  // plugin sandbox -> bridge (acks/results)
+  window.onmessage = (ev) => {
+    const msg = ev.data.pluginMessage;
+    if (msg && ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify(msg));
+    }
+  };
+</script>
